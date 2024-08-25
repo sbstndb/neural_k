@@ -4,6 +4,8 @@ project(neural_k)
 set(Kokkos_COMMON_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../dep/Kokkos)
 find_package(Kokkos CONFIG)
 
+find_package(KokkosKernels REQUIRED)
+
 add_subdirectory(external/HighFive)
 
 if(Kokkos_FOUND)
@@ -26,7 +28,10 @@ endif()
 
 
 add_executable(nk src/main.cpp)
-target_link_libraries(nk Kokkos::kokkos HighFive)
+target_link_libraries(nk HighFive Kokkos::kokkos Kokkos::kokkoskernels)
+
+
+
 
 
 
