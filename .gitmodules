@@ -1,3 +1,6 @@
 [submodule "external/HighFive"]
 	path = external/HighFive
 	url = https://github.com/BlueBrain/HighFive
+[submodule "external/kokkos-kernels"]
+	path = external/kokkos-kernels
+	url = https://github.com/kokkos/kokkos-kernels
