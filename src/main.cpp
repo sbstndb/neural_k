@@ -121,7 +121,7 @@ public :
 
 	int input_size ; 
 	int layer_size ; 
-	LayerActivation activationType = LayerActivation::RELU;
+	LayerActivation activationType = LayerActivation::SIGMOID;
 
 	View2D weights ; 
 	View1D biases ; 
@@ -149,7 +149,7 @@ public :
 // ///////////////////////
 		std::random_device rd ; 
 		std::mt19937 gen(rd()); 
-		std::uniform_real_distribution<real> dist(-0.8, 0.8);
+		std::uniform_real_distribution<real> dist(-1.0, 1.0);
 
 		for (int i = 0; i < layer_size; ++i) {
 			biases(i) = dist(gen); 
@@ -324,11 +324,20 @@ public:
 	}
 
 	void target(real*  target, int size){
-
 		for (int i = 0 ; i < size ; i++){
 			output_layer.target(i) = target[i] ; 
 		}
 	}
+
+	real cost(){
+		real sum = 0.0 ; 
+		for (int i = 0 ; i < output_layer.layer_size ; i++){
+			real diff = output_layer.target(i) - output_layer.a(i) ; 
+			sum += diff * diff ; 
+		}
+		return 0.5 * sum ;
+	}
+
 
 	void show(){
 		layer1.show() ; 
@@ -338,46 +347,106 @@ public:
 };
 
 
-int main(int argc, char **argv) {
-	std::cout << "-- Neural Library --" << std::endl;
-	Kokkos::initialize(argc, argv);
-	{/////////////////////////
+void xor_train(void){
 	int n1 = 2 ; // n entree
-	int n2 = 2 ; 
-	int n3 = 2 ; 
-	int nsortie = 1 ; 
-	DenseNeuralNetwork dnn(n1, n2, n3, nsortie) ; 
-	dnn.output_layer.activationType = Layer::LayerActivation::LINEAR; 
-	real xor_inputs[4][2] = {
-		{0.0,0.0},
-		{0.0,1.0},
-		{1.0,0.0},
-		{1.0,1.0}};
-	real xor_outputs[4][1] = {{0.0},{1.0},{1.0},{0.0}};
+        int n2 = 2 ;
+        int n3 = 2 ;
+        int nsortie = 1 ;
+        DenseNeuralNetwork dnn(n1, n2, n3, nsortie) ;
+        dnn.output_layer.activationType = Layer::LayerActivation::LINEAR;
+        real xor_inputs[4][2] = {
+                {0.0,0.0},
+                {0.0,1.0},
+                {1.0,0.0},
+                {1.0,1.0}};
+        real xor_outputs[4][1] = {{0.0},{1.0},{1.0},{0.0}};
 
-	int epochs = 1000; 
-	real learning_rate = 0.1 ; 
+        int epochs = 10000;
+        real learning_rate = 0.01 ;
         std::cout << "-- TRAINING --" << std::endl;
-	for (int epoch = 0 ; epoch < epochs ; epoch++){
-		for (int i = 0 ; i < 4 ; i++){
-			dnn.input(xor_inputs[i], n1) ; 
-			dnn.target(xor_outputs[i], nsortie) ; 
-			dnn.train(learning_rate) ; 
-		}
-	}
+        for (int epoch = 0 ; epoch < epochs ; epoch++){
+		real total_cost = 0.0 ; 
+                for (int i = 0 ; i < 4 ; i++){
+                        dnn.input(xor_inputs[i], n1) ;
+                        dnn.target(xor_outputs[i], nsortie) ;
+                        dnn.train(learning_rate) ;
+			total_cost += dnn.cost()/4 ;  
+                }
+		std::cout << "Cost : " << total_cost << std::endl ; 
+        }
         std::cout << "-- TRAINING END --" << std::endl;
 
-	dnn.show() ; 
+        dnn.show() ;
 
-	// inference
-	for (int i = 0 ; i < 4 ; i++){
-		dnn.input(xor_inputs[i], n1) ; 
-		auto output = dnn.forward() ;
-		std::cout << "Input : " << dnn.input_layer.a(0) << " -- " << dnn.input_layer.a(1) << std::endl ; 
-		std::cout << "--> Predicted : " << dnn.output_layer.a(0) << " | Espered --> " << xor_outputs[i][0] << std::endl ; 
-	}
-	}/////////////////////////
-	Kokkos::finalize();
+        // inference
+        for (int i = 0 ; i < 4 ; i++){
+                dnn.input(xor_inputs[i], n1) ;
+                auto output = dnn.forward() ;
+                std::cout << "Input : " << dnn.input_layer.a(0) << " -- " << dnn.input_layer.a(1) << std::endl ;
+                std::cout << "--> Predicted : " << dnn.output_layer.a(0) << " | Espered --> " << xor_outputs[i][0] << std::endl ;
+        }
+}
+
+
+void p_train(void){
+        int n1 = 2 ; // n entree
+        int n2 = 2 ;
+        int n3 = 2 ;
+        int nsortie = 1 ;
+        DenseNeuralNetwork dnn(n1, n2, n3, nsortie) ;
+        dnn.output_layer.activationType = Layer::LayerActivation::LINEAR;
+        real xor_inputs[10][2] = {
+                {1.2,0.7},
+                {-0.3,-0.5},
+                {3.0,0.1},
+                {-0.1,-1.0},
+                {-0.0,1.1},
+                {2.1,-1.3},
+                {3.1,-1.8},
+                {1.1,-0.1},
+                {1.5,-2.2},
+                {-4.0,-1.0},
+
+	
+	};
+        real xor_outputs[10][1] = {{1.0},{-1.0},{1.0},{-1.0}, {-1.0}, {1.0}, {-1.0}, {1.0}, {-1.0}, {-1.0}};
+
+        int epochs = 4010;
+        real learning_rate = 0.010;
+        std::cout << "-- TRAINING --" << std::endl;
+        for (int epoch = 0 ; epoch < epochs ; epoch++){
+                real total_cost = 0.0 ;
+                for (int i = 0 ; i < 10 ; i++){
+                        dnn.input(xor_inputs[i], n1) ;
+                        dnn.target(xor_outputs[i], nsortie) ;
+                        dnn.train(learning_rate) ;
+                        total_cost += dnn.cost()/10 ;
+                }
+                std::cout << "Cost : " << total_cost << std::endl ;
+        }
+        std::cout << "-- TRAINING END --" << std::endl;
+
+        dnn.show() ;
+
+        // inference
+        for (int i = 0 ; i < 10 ; i++){
+                dnn.input(xor_inputs[i], n1) ;
+                auto output = dnn.forward() ;
+                std::cout << "Input : " << dnn.input_layer.a(0) << " -- " << dnn.input_layer.a(1) << std::endl ;
+                std::cout << "--> Predicted : " << dnn.output_layer.a(0) << " | Espered --> " << xor_outputs[i][0] << std::endl ;
+        }
+}
+
+
+
+int main(int argc, char **argv) {
+        std::cout << "-- Neural Library --" << std::endl;
+        Kokkos::initialize(argc, argv);
+        {/////////////////////////
+		p_train() ; 
+        }/////////////////////////
+        Kokkos::finalize();
+
 	std::cout << "-- Brain completed ;-) --" << std::endl;
 	return 0;
 }
