@@ -121,7 +121,7 @@ public :
 
 	int input_size ; 
 	int layer_size ; 
-	LayerActivation activationType = LayerActivation::SIGMOID;
+	LayerActivation activationType = LayerActivation::RELU;
 
 	View2D weights ; 
 	View1D biases ; 
@@ -343,10 +343,11 @@ int main(int argc, char **argv) {
 	Kokkos::initialize(argc, argv);
 	{/////////////////////////
 	int n1 = 2 ; // n entree
-	int n2 = 4 ; 
-	int n3 = 4 ; 
+	int n2 = 2 ; 
+	int n3 = 2 ; 
 	int nsortie = 1 ; 
 	DenseNeuralNetwork dnn(n1, n2, n3, nsortie) ; 
+	dnn.output_layer.activationType = Layer::LayerActivation::LINEAR; 
 	real xor_inputs[4][2] = {
 		{0.0,0.0},
 		{0.0,1.0},
@@ -354,8 +355,8 @@ int main(int argc, char **argv) {
 		{1.0,1.0}};
 	real xor_outputs[4][1] = {{0.0},{1.0},{1.0},{0.0}};
 
-	int epochs = 0; 
-	real learning_rate = 0.001 ; 
+	int epochs = 1000; 
+	real learning_rate = 0.1 ; 
         std::cout << "-- TRAINING --" << std::endl;
 	for (int epoch = 0 ; epoch < epochs ; epoch++){
 		for (int i = 0 ; i < 4 ; i++){
