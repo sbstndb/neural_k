@@ -18,9 +18,9 @@ make -j
 ```
 
 # Usage
-*You can currently launch the executable named `NN` with the following command :
+*You can currently launch the executable named `nk` with the following command :
 ```
-./GS
+./nk
 ```
 This will run the executable with the default parameters.
 
