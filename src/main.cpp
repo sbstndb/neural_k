@@ -83,7 +83,7 @@ public :
         void d_activation(Layer::LayerActivation Activation, View1D input, View1D output){
                 if(Activation == LayerActivation::SIGMOID){
                        Kokkos::parallel_for("sigmoid", layer_size, KOKKOS_LAMBDA(int i) {
-                               real s = sigmoid(input(i));
+                               real s = sigmoid(input(i)); // should be = to a(i)
 			       output(i) = s * (1.0 - s) ; 
                         });
 
@@ -121,13 +121,15 @@ public :
 
 	int input_size ; 
 	int layer_size ; 
-	LayerActivation activationType = LayerActivation::SIGMOID;
+	LayerActivation activationType = LayerActivation::TANH;
 
 	View2D weights ; 
 	View1D biases ; 
 	View1D z ; // before activation
 	View1D a ; // similar to activation in my case
 	View1D d ; // derivative of layer
+        View2D d_w_sum ; // sum of d for all samples ! 
+	View1D d_b_sum ; // sum of d for all samples ! 
 	View1D tmp ; // general purpose temporary vector
 
 
@@ -140,6 +142,8 @@ public :
 		z = View1D("z", layer_size) ; 
 		a = View1D("a", layer_size) ;
 		d = View1D("d_layer", layer_size) ; 
+                d_w_sum = View2D("d_w_sum_layer", layer_size, input_size) ;		
+                d_b_sum = View1D("d_b_sum_layer", layer_size) ;		
 		tmp = View1D("tmp", layer_size) ; 
 
 // issue : repetitive generation among layers. For now : do not use fill random until we know how to random the seed
@@ -149,7 +153,7 @@ public :
 // ///////////////////////
 		std::random_device rd ; 
 		std::mt19937 gen(rd()); 
-		std::uniform_real_distribution<real> dist(-1.0, 1.0);
+		std::uniform_real_distribution<real> dist(-0.1, 0.1);
 
 		for (int i = 0; i < layer_size; ++i) {
 			biases(i) = dist(gen); 
@@ -168,7 +172,17 @@ public :
 		activation(activationType, z, a) ; 
 	}
 
-	void gradient(const auto& next_layer){
+	void init_d_sum(){
+                Kokkos::parallel_for("init_d_sum", layer_size, KOKKOS_LAMBDA(int i) {
+			for (int j = 0 ; j < input_size ; j++){
+	                        d_w_sum(i,j) = 0.0;
+			}
+			d_b_sum(i) = 0.0 ; 
+                });
+
+	}
+
+	void gradient(const auto& previous_layer, const auto& next_layer){
                 // layer 2
 		// for each neurons
 		//
@@ -180,22 +194,26 @@ public :
                                 sum += next_layer.d(j) * next_layer.weights(j,i) ; // transpose ? 
                         }
                         d(i) = sum * tmp(i) ;
+			d_b_sum(i) += d(i) ; 
+			for (int j = 0 ; j < input_size ; j++){
+				d_w_sum(i,j) += d(i) * previous_layer.a(j);
+			}
                 });	
 	}
 
-	void update(const auto& previous_layer, real learning_rate){
+	void update(real learning_rate){
                 Kokkos::parallel_for("update_layer_weights", layer_size, KOKKOS_LAMBDA (int i){
                         for (int j = 0 ; j < input_size; j++){
-                                weights(i,j) -= learning_rate * d(i) * previous_layer.a(j) ;
+                                weights(i,j) -= learning_rate * d_w_sum(i,j)  ;
                         }
-                        biases(i) -= learning_rate * d(i) ;
+                        biases(i) -= learning_rate * d_b_sum(i) ;
                 });
 
 	}
 
 	void backward(const auto& previous_layer, const auto& next_layer, real learning_rate){
-		gradient(next_layer);
-		update(previous_layer, learning_rate) ; 
+		gradient(previous_layer, next_layer);
+		update(learning_rate) ; 
 	}
 
 
@@ -232,29 +250,32 @@ public :
 		Layer::forward(input) ;
 	}
 
-        void gradient(){
-                // layer 2
-                // for each neurons
-                //
-                d_activation(activationType, a, tmp) ;
+        void gradient(const Layer& previous_layer){
+                d_activation(activationType, z, tmp) ;
                 Kokkos::parallel_for("compute_layer_error", layer_size, KOKKOS_LAMBDA(int i){
                         real sum = 0.0 ;
                         // for each next neurons
                         d(i) = (a(i) - target(i)) * tmp(i) ;
+                        d_b_sum(i) += d(i) ;
+                        for (int j = 0 ; j < input_size ; j++){
+                                d_w_sum(i,j) += d(i) * previous_layer.a(j);
+                        }
+
+
                 });
         }
 
-        void update(const Layer& previous_layer, real learning_rate){
+        void update(real learning_rate){
                 Kokkos::parallel_for("update_layer_weights", layer_size, KOKKOS_LAMBDA (int i){
                         for (int j = 0 ; j < input_size; j++){
-                                weights(i,j) -= learning_rate * d(i) * previous_layer.a(j) ;
+                                weights(i,j) -= learning_rate * d_w_sum(i,j) ;
                         }
-                        biases(i) -= learning_rate * d(i) ;
+                        biases(i) -= learning_rate * d_b_sum(i) ;
                 });
         }
        void backward(const Layer& previous_layer, real learning_rate){
-                gradient();
-                update(previous_layer, learning_rate) ;
+                gradient(previous_layer);
+                update(learning_rate) ;
         }
 
 
@@ -303,13 +324,23 @@ public:
 	
 
 
+	void init_d_sum(){
+		layer1.init_d_sum() ; 
+		layer2.init_d_sum() ; 
+		output_layer.init_d_sum() ; 
+	}
+
 	void train( const View1D input, const View1D target, real learning_rate){
 		auto prediction = forward(input)  ;
 		// update layers ; 
-		output_layer.backward(layer2, learning_rate); 
+		//output_layer.backward(layer2, learning_rate); 
 		// previous layer -- next layer -- learning_rate
-		layer2.backward(layer1, output_layer, learning_rate) ; 
-		layer1.backward(input_layer, layer2, learning_rate) ; 
+		//layer2.backward(layer1, output_layer, learning_rate) ; 
+		//layer1.backward(input_layer, layer2, learning_rate) ; 
+		//
+		output_layer.gradient(layer2); 
+		layer2.gradient(layer1, output_layer); 
+		layer1.gradient(input_layer, layer2); 
 	}
 
 
@@ -317,6 +348,11 @@ public:
 		train(input_layer.a, output_layer.target, learning_rate);
 	}
 
+	void update(real learning_rate){
+                output_layer.update(learning_rate) ;
+                layer2.update(learning_rate);
+                layer1.update(learning_rate);		
+	}
 	void input(real * input, int size){
 		for (int i = 0 ; i < size ; i++){
 			input_layer.a(i) = input[i] ; 
@@ -349,52 +385,50 @@ public:
 
 void xor_train(void){
 	int n1 = 2 ; // n entree
-        int n2 = 2 ;
+        int n2 = 3 ;
         int n3 = 2 ;
         int nsortie = 1 ;
         DenseNeuralNetwork dnn(n1, n2, n3, nsortie) ;
-        dnn.output_layer.activationType = Layer::LayerActivation::LINEAR;
-        real xor_inputs[4][2] = {
+        dnn.output_layer.activationType = Layer::LayerActivation::TANH;
+        real xor_inputs[5][2] = {
                 {0.0,0.0},
-                {0.0,1.0},
+                {1.0,1.0},
                 {1.0,0.0},
-                {1.0,1.0}};
-        real xor_outputs[4][1] = {{0.0},{1.0},{1.0},{0.0}};
+                {0.0,1.0},
+		{0.0,0.0}};
+        real xor_outputs[5][1] = {{-1.0},{-1.0},{1.0},{1.0},{-1.0}};
 
-        int epochs = 10000;
+        int epochs = 40000;
         real learning_rate = 0.01 ;
         std::cout << "-- TRAINING --" << std::endl;
         for (int epoch = 0 ; epoch < epochs ; epoch++){
 		real total_cost = 0.0 ; 
-                for (int i = 0 ; i < 4 ; i++){
+		dnn.init_d_sum() ; 
+                for (int i = 0 ; i < 5 ; i++){
                         dnn.input(xor_inputs[i], n1) ;
                         dnn.target(xor_outputs[i], nsortie) ;
                         dnn.train(learning_rate) ;
 			total_cost += dnn.cost()/4 ;  
                 }
+                dnn.update(learning_rate);// update with average 
 		std::cout << "Cost : " << total_cost << std::endl ; 
         }
         std::cout << "-- TRAINING END --" << std::endl;
-
         dnn.show() ;
-
-        // inference
-        for (int i = 0 ; i < 4 ; i++){
+        for (int i = 0 ; i < 5 ; i++){
                 dnn.input(xor_inputs[i], n1) ;
                 auto output = dnn.forward() ;
                 std::cout << "Input : " << dnn.input_layer.a(0) << " -- " << dnn.input_layer.a(1) << std::endl ;
                 std::cout << "--> Predicted : " << dnn.output_layer.a(0) << " | Espered --> " << xor_outputs[i][0] << std::endl ;
         }
 }
-
-
 void p_train(void){
         int n1 = 2 ; // n entree
         int n2 = 3 ;
         int n3 = 2 ;
         int nsortie = 1 ;
         DenseNeuralNetwork dnn(n1, n2, n3, nsortie) ;
-        dnn.output_layer.activationType = Layer::LayerActivation::LINEAR;
+        dnn.output_layer.activationType = Layer::LayerActivation::TANH;
         real xor_inputs[10][2] = {
                 {1.2,0.7},
                 {-0.3,-0.5},
@@ -405,23 +439,22 @@ void p_train(void){
                 {3.1,-1.8},
                 {1.1,-0.1},
                 {1.5,-2.2},
-                {-4.0,-1.0},
-
-	
+                {-4.0,-1.0},	
 	};
         real xor_outputs[10][1] = {{1.0},{-1.0},{1.0},{-1.0}, {-1.0}, {1.0}, {-1.0}, {1.0}, {-1.0}, {-1.0}};
-
-        int epochs = 4010;
-        real learning_rate = 0.010;
+        int epochs = 40100;
+        real learning_rate = 0.10;
         std::cout << "-- TRAINING --" << std::endl;
         for (int epoch = 0 ; epoch < epochs ; epoch++){
                 real total_cost = 0.0 ;
+		dnn.init_d_sum(); 
                 for (int i = 0 ; i < 10 ; i++){
                         dnn.input(xor_inputs[i], n1) ;
                         dnn.target(xor_outputs[i], nsortie) ;
                         dnn.train(learning_rate) ;
                         total_cost += dnn.cost()/10 ;
                 }
+		dnn.update(learning_rate);
                 std::cout << "Cost : " << total_cost << std::endl ;
         }
         std::cout << "-- TRAINING END --" << std::endl;
@@ -443,7 +476,7 @@ int main(int argc, char **argv) {
         std::cout << "-- Neural Library --" << std::endl;
         Kokkos::initialize(argc, argv);
         {/////////////////////////
-		p_train() ; 
+		xor_train() ; 
         }/////////////////////////
         Kokkos::finalize();
 
