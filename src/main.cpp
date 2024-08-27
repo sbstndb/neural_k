@@ -54,17 +54,17 @@ public:
 
 	View1D d_b ; 
 	View1D biases ; 
-	View2D weigths ;
+	View2D weights ;
 	real learning_rate ; 
 	int opt_size, input_size ; 
 
 
-        Optimizer(int input_size, int layer_size):
-                        input_size(input_size), opt_size(opt_size) {}
-	Optimizer(View2D& weigths, View1D& biases, int input_size, int layer_size):
-			weigths(weigths), biases(biases), input_size(input_size), opt_size(opt_size)  {}
-	Optimizer(View2D& weigths, View1D& biases):
-                       weigths(weigths), biases(biases), input_size(weigths.extent(1)), opt_size(weigths.extent(0))  {}
+//        Optimizer(int input_size, int layer_size):
+//                        input_size(input_size), opt_size(opt_size) {}
+//	Optimizer(View2D& weights, View1D& biases, int input_size, int layer_size):
+//			weights(weights), biases(biases), input_size(input_size), opt_size(opt_size)  {}
+//	Optimizer(View2D& weights, View1D& biases):
+//                       weights(weights), biases(biases), input_size(weights.extent(1)), opt_size(weights.extent(0))  {}
 		
 
 
@@ -118,6 +118,32 @@ public:
 
 class BatchGradientDescent : public Optimizer {
 public:
+
+	View1D biases ; 
+	View2D weights ;
+
+	View1D d, d_b_sum, tmp;
+	View2D d_w_sum ; 
+
+	int opt_size, input_size; 
+	real learning_rate;
+
+        BatchGradientDescent(View2D& weigths, View1D& biases, int input_size, int opt_size):
+                        weights(weights), biases(biases), input_size(input_size), opt_size(opt_size)  {
+                d = View1D("d_layer", opt_size) ;
+                d_w_sum = View2D("d_w_sum_layer", opt_size, input_size) ;
+                d_b_sum = View1D("d_b_sum_layer", opt_size) ;
+                tmp = View1D("tmp", opt_size) ;
+	}
+
+	void zero(){
+		Kokkos::deep_copy(d, 0.0);
+		Kokkos::deep_copy(d_b_sum, 0.0); 
+		Kokkos::deep_copy(d_w_sum, 0.0);
+	}
+
+
+
 };
 
 class StochasticGradientDescent : public Optimizer {
