@@ -18,9 +18,9 @@ make -j
 ```
 
 # Usage
-*You can currently launch the executable named `NN` with the following command :
+*You can currently launch the executable named `nk` with the following command :
 ```
-./GS
+./nk
 ```
 This will run the executable with the default parameters.
 
@@ -39,5 +39,11 @@ spack load kokkos
 # Todo 
 ### To-Do List
 
-- [ ] Provide the MVP (Minimal Viable Product)
+- [x] Provide the MVP (Minimal Viable Product)
+- [ ] Support flexible network architectures
+- [ ] Enable GPU-accelerated Execution (CUDA/HIP)
+- [ ] Design user-friendly API
+- [ ] Add tests
+- [ ] Add documentation
+- [ ] Implement batch training strategies
 
