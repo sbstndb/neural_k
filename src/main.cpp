@@ -47,8 +47,28 @@ real d_sigmoid(real x){
 // I suggest to implement a new class named optimizer with subclasses. Hence, the neural network only contains an optimizer and not a lot of d_x_blabla arrays. DNN should only contains weights, input, output and the optimizer structure !
 
 
+class Layer;
+
 class Optimizer {
 public:
+
+	View1D d_b ; 
+	View1D biases ; 
+	View2D weigths ;
+	real learning_rate ; 
+	int opt_size, input_size ; 
+
+
+        Optimizer(int input_size, int layer_size):
+                        input_size(input_size), opt_size(opt_size) {}
+	Optimizer(View2D& weigths, View1D& biases, int input_size, int layer_size):
+			weigths(weigths), biases(biases), input_size(input_size), opt_size(opt_size)  {}
+	Optimizer(View2D& weigths, View1D& biases):
+                       weigths(weigths), biases(biases), input_size(weigths.extent(1)), opt_size(weigths.extent(0))  {}
+		
+
+
+	///////////////////////
 	enum class OptimizerType{
 		// compute d_ for all input training data hence update weigths
 		BatchGradientDescent,
@@ -56,10 +76,60 @@ public:
 		StochasticGradientDescent,
 		// todo
 		MiniBatchGradientDescent,
-		MementumGradientDescent,
+		MomentumGradientDescent,
 		ADAM
+	};
+	///////////////////////
+
+
+	void gradient(const Layer& previous_layer, const Layer& next_layer){
 	}
+
+	void update_biases(const View1D& biases, real _learning_rate){
+                Kokkos::parallel_for("update_layer_biases", opt_size, KOKKOS_LAMBDA (int i){
+                        biases(i) -= _learning_rate * d_b(i) ;
+                });
+	}
+        void update_biases(const View1D& biases){
+		update_biases(biases, learning_rate);
+	}
+
+
+        void update_weights(const View2D& weights, real _learning_rate){
+                update_weights(weights, _learning_rate);
+                // too specify to be implemented here
+        }
+	void update_weights(const View2D& weights){
+		update_weights(weights, learning_rate);
+		// too specify to be implemented here
+	}
+
+	void update(const View1D& biases, const View2D& weights){
+		update_biases(biases);
+		update_weights(weights);
+	}
+	
+
 };
+
+// dont know if i should use enum or subclasses...
+//
+//
+
+class BatchGradientDescent : public Optimizer {
+public:
+};
+
+class StochasticGradientDescent : public Optimizer {
+public:
+};
+
+class MiniBatchGradientDescent : public Optimizer {
+public:
+};
+
+
+
 
 class Layer  {
 public : 
