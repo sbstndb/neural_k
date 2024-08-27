@@ -32,6 +32,24 @@ real d_sigmoid(real x){
 }
 
 
+// TODO : 
+// better activation & d_activation functions
+// use kokkos kernels more often when needed
+// provide better API --> give dnn the training data once. Take care : consume more memory
+// use nested view with kokkos
+// implement different gradient algorithms
+// -- batch gradient descent
+// -- stochastic gradient descent
+// -- mini batch gradient descent
+// -- batch stochastic gradient descent
+// -- gradient descent avec momentum
+// -- adaptive method like Adam, RMSprop, Adagrad
+// I suggest to implement a new class named optimizer with subclasses. Hence, the neural network only contains an optimizer and not a lot of d_x_blabla arrays. DNN should only contains weights, input, output and the optimizer structure !
+
+
+class Optimizer {
+public:
+};
 
 class Layer  {
 public : 
@@ -116,8 +134,6 @@ public :
                         });
                 }
         }
-
-
 
 	int input_size ; 
 	int layer_size ; 
@@ -396,10 +412,10 @@ void xor_train(void){
                 {1.0,0.0},
                 {0.0,1.0},
 		{0.0,0.0}};
-        real xor_outputs[5][1] = {{-1.0},{-1.0},{1.0},{1.0},{-1.0}};
+        real xor_outputs[5][1] = {{-0.0},{-0.0},{1.0},{1.0},{-0.0}};
 
-        int epochs = 40000;
-        real learning_rate = 0.01 ;
+        int epochs = 4000;
+        real learning_rate = 0.1 ;
         std::cout << "-- TRAINING --" << std::endl;
         for (int epoch = 0 ; epoch < epochs ; epoch++){
 		real total_cost = 0.0 ; 
@@ -428,7 +444,7 @@ void p_train(void){
         int n3 = 2 ;
         int nsortie = 1 ;
         DenseNeuralNetwork dnn(n1, n2, n3, nsortie) ;
-        dnn.output_layer.activationType = Layer::LayerActivation::TANH;
+        dnn.output_layer.activationType = Layer::LayerActivation::RELU;
         real xor_inputs[10][2] = {
                 {1.2,0.7},
                 {-0.3,-0.5},
