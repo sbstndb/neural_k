@@ -49,6 +49,16 @@ real d_sigmoid(real x){
 
 class Optimizer {
 public:
+	enum class OptimizerType{
+		// compute d_ for all input training data hence update weigths
+		BatchGradientDescent,
+		// compute d_ for only one input hence update
+		StochasticGradientDescent,
+		// todo
+		MiniBatchGradientDescent,
+		MementumGradientDescent,
+		ADAM
+	}
 };
 
 class Layer  {
