@@ -128,7 +128,7 @@ public :
 	View1D z ; // before activation
 	View1D a ; // similar to activation in my case
 	View1D d ; // derivative of layer
-	View1D tmp ; 
+	View1D tmp ; // general purpose temporary vector
 
 
 	Kokkos::Random_XorShift64_Pool<> rand_pool ;
@@ -172,7 +172,7 @@ public :
                 // layer 2
 		// for each neurons
 		//
-		d_activation(activationType, a, tmp) ; 
+		d_activation(activationType, z, tmp) ; 
                 Kokkos::parallel_for("compute_layer_error", layer_size, KOKKOS_LAMBDA(int i){
                         real sum = 0.0 ;
 			// for each next neurons
@@ -390,7 +390,7 @@ void xor_train(void){
 
 void p_train(void){
         int n1 = 2 ; // n entree
-        int n2 = 2 ;
+        int n2 = 3 ;
         int n3 = 2 ;
         int nsortie = 1 ;
         DenseNeuralNetwork dnn(n1, n2, n3, nsortie) ;
