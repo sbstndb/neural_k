@@ -128,13 +128,21 @@ public:
 	int opt_size, input_size; 
 	real learning_rate;
 
-        BatchGradientDescent(View2D& weigths, View1D& biases, int input_size, int opt_size):
-                        weights(weights), biases(biases), input_size(input_size), opt_size(opt_size)  {
+        BatchGradientDescent(int input_size, int opt_size):
+                        input_size(input_size), opt_size(opt_size)  {
                 d = View1D("d_layer", opt_size) ;
                 d_w_sum = View2D("d_w_sum_layer", opt_size, input_size) ;
                 d_b_sum = View1D("d_b_sum_layer", opt_size) ;
                 tmp = View1D("tmp", opt_size) ;
-	}
+        }
+
+//        BatchGradientDescent(View2D& weigths, View1D& biases, int input_size, int opt_size):
+//                        weights(weights), biases(biases), input_size(input_size), opt_size(opt_size)  {
+//                d = View1D("d_layer", opt_size) ;
+//                d_w_sum = View2D("d_w_sum_layer", opt_size, input_size) ;
+//                d_b_sum = View1D("d_b_sum_layer", opt_size) ;
+//                tmp = View1D("tmp", opt_size) ;
+//	}
 
 	void zero(){
 		Kokkos::deep_copy(d, 0.0);
@@ -142,8 +150,56 @@ public:
 		Kokkos::deep_copy(d_w_sum, 0.0);
 	}
 
+        void gradient(const auto& previous_layer, const auto& layer, const auto& next_layer){
+		layer.d_activation(layer.activationType, layer.z, layer.tmp) ;
+                Kokkos::parallel_for("compute_layer_error", layer.layer_size, KOKKOS_LAMBDA(int i){
+                        real sum = 0.0 ;
+                        // for each next neurons
+                        for (int j = 0 ; j < next_layer.layer_size; j++){
+                                sum += next_layer.d(j) * next_layer.weights(j,i) ; // transpose ? 
+                        }
+                        d(i) = sum * layer.tmp(i) ;
+                        d_b_sum(i) += d(i) ;
+                        for (int j = 0 ; j < layer.input_size ; j++){
+                                d_w_sum(i,j) += d(i) * previous_layer.a(j);
+                        }
+                });
+        }
+
+	//void update_biases(){}; // already defined in base class
+				//
+        void update_weigths(const auto& weigths, real learning_rate){
+                Kokkos::parallel_for("update_layer_weights", opt_size, KOKKOS_LAMBDA (int i){
+                        for (int j = 0 ; j < input_size; j++){
+                                weights(i,j) -= learning_rate * d_w_sum(i,j)  ;
+                        }
+                });
+
+        }
+	void update(const auto& layer, real learning_rate){
+		update_weights(layer.weigths, learning_rate);
+		update_biases(layer.biases, learning_rate);
+	}
+};
+
+class BatchGradientDescentOutput : public BatchGradientDescent{
+
+        using BatchGradientDescent::BatchGradientDescent;
 
 
+	// specific definition for gradient
+        void gradient(const auto& previous_layer, const auto& layer){
+                layer.d_activation(layer.activationType, layer.z, layer.tmp) ;
+                Kokkos::parallel_for("compute_layer_error", layer.layer_size, KOKKOS_LAMBDA(int i){
+                        real sum = 0.0 ;
+                        // for each next neurons
+                        d(i) = (layer.a(i) - layer.target(i)) * layer.tmp(i) ;
+                        d_b_sum(i) += d(i) ;
+                        for (int j = 0 ; j < input_size ; j++){
+                                d_w_sum(i,j) += d(i) * previous_layer.a(j);
+                        }
+                });
+        }
 };
 
 class StochasticGradientDescent : public Optimizer {
@@ -244,6 +300,8 @@ public :
 	int input_size ; 
 	int layer_size ; 
 	LayerActivation activationType = LayerActivation::TANH;
+	BatchGradientDescent optimizer ; 
+
 
 	View2D weights ; 
 	View1D biases ; 
@@ -258,7 +316,7 @@ public :
 	Kokkos::Random_XorShift64_Pool<> rand_pool ;
 
 	Layer(int input_size, int layer_size):
-			rand_pool(std::time(0)), input_size(input_size), layer_size(layer_size) {
+			rand_pool(std::time(0)), input_size(input_size), layer_size(layer_size), optimizer(input_size, layer_size) {
 		weights = View2D("weights", layer_size, input_size) ; 
 		biases = View1D("biases", layer_size) ; 
 		z = View1D("z", layer_size) ; 
@@ -364,8 +422,11 @@ class OutputLayer : public Layer {
 public : 
 
 	View1D target ; 
+        BatchGradientDescentOutput optimizer ;
 
-	OutputLayer(int input_size, int output_size) : Layer(input_size, output_size) {
+
+
+	OutputLayer(int input_size, int output_size) : Layer(input_size, output_size), optimizer(input_size, output_size) {
 		target = View1D("target", layer_size) ;
 	}
 	void forward(const View1D input) {
