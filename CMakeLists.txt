@@ -6,7 +6,7 @@ find_package(Kokkos CONFIG)
 
 find_package(KokkosKernels REQUIRED)
 
-add_subdirectory(external/HighFive)
+find_package(HighFive)
 
 if(Kokkos_FOUND)
   message(STATUS "Found Kokkos: ${Kokkos_DIR} (version \"${Kokkos_VERSION}\")")
@@ -27,7 +27,7 @@ endif()
 
 
 
-add_executable(nk src/main.cpp)
+add_executable(nk src/main_6.cpp)
 target_link_libraries(nk HighFive Kokkos::kokkos Kokkos::kokkoskernels)
 
 
