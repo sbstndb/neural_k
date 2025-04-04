@@ -27,8 +27,8 @@ endif()
 
 
 
-add_executable(nk src/main_6.cpp)
-target_link_libraries(nk HighFive Kokkos::kokkos Kokkos::kokkoskernels)
+add_executable(nk src/main_csr3.cpp)
+target_link_libraries(nk Kokkos::kokkos Kokkos::kokkoskernels)
 
 
 
