@@ -27,7 +27,14 @@ endif()
 
 
 
-add_executable(nk src/main_csr3.cpp)
+add_executable(nk 
+    src/main.cpp
+    src/activations.cpp
+    src/optimizers.cpp
+    src/layers.cpp
+    src/network.cpp
+    src/training.cpp
+)
 target_link_libraries(nk Kokkos::kokkos Kokkos::kokkoskernels)
 
 

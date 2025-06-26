@@ -9,20 +9,18 @@
 #include <string>
 #include <memory>
 #include <stdexcept>
-#include <numeric> // Pour std::iota
-#include <iomanip> // Pour std::setprecision
-#include <typeinfo> // Pour typeid dans Network::show
-#include <chrono>  // Pour seed random
+#include <numeric>
+#include <iomanip>
+#include <typeinfo>
+#include <chrono>
 
 #include <Kokkos_Core.hpp>
 #include <Kokkos_Random.hpp>
-#include <KokkosBlas.hpp> // Still needed for gemv with biases/dense vectors if any remain
-#include <Kokkos_StdAlgorithms.hpp> // Pour parallel_reduce
-
-// *** NOUVEAUX INCLUDES POUR SPARSE ***
+#include <KokkosBlas.hpp>
+#include <Kokkos_StdAlgorithms.hpp>
 #include <KokkosSparse_CrsMatrix.hpp>
 #include <KokkosSparse_spmv.hpp>
-#include <KokkosKernels_Handle.hpp> // Peut être nécessaire pour spmv
+#include <KokkosKernels_Handle.hpp>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -35,28 +33,25 @@ using View1D = Kokkos::View<real*>;
 
 // *** TYPEDEFS POUR SPARSE MATRIX ***
 using Scalar = real;
-using Ordinal = int;      // Type for matrix indices
-using Offset = size_t;    // Type for row map offsets
+using Ordinal = int;
+using Offset = size_t;
 using Device = Kokkos::DefaultExecutionSpace;
-// Using LayoutLeft because dense Views often default to this, keeps consistency conceptually
 using Layout = Kokkos::LayoutLeft;
 using SparseMatrixType = KokkosSparse::CrsMatrix<Scalar, Ordinal, Device, void, Offset>;
 using GraphType = typename SparseMatrixType::staticcrsgraph_type;
-using ValuesType = typename SparseMatrixType::values_type; // Kokkos::View<Scalar*>
-using RowMapType = typename GraphType::row_map_type::non_const_type; // View<Offset*>
-using EntriesType = typename GraphType::entries_type::non_const_type; // View<Ordinal*>
+using ValuesType = typename SparseMatrixType::values_type;
+using RowMapType = typename GraphType::row_map_type::non_const_type;
+using EntriesType = typename GraphType::entries_type::non_const_type;
 
-// --- Forward Declarations ---
-class Optimizer; // Base class
-class SGD;       // Concrete optimizer
-class Adam;      // Concrete optimizer (to be added)
+class Optimizer;
+class SGD;
+class Adam;
 class Layer;
 class Activation;
 class Dataset;
 class Network;
 class BatchHandler;
 
-// --- Classe Optimizer ---
 class Optimizer {
 public:
     real learning_rate;
@@ -64,8 +59,7 @@ public:
     Optimizer(real lr) : learning_rate(lr) {}
     virtual ~Optimizer() = default;
 
-    // MODIFIED: Takes SparseMatrixType for weights and gradients
-    virtual void update(SparseMatrixType& weights, View1D biases, // biases remain dense
+    virtual void update(SparseMatrixType& weights, View1D biases,
                         const SparseMatrixType& accumulated_d_weights, const View1D& accumulated_d_biases,
                         int batch_size) = 0;
 
@@ -77,12 +71,10 @@ public:
     }
 };
 
-// --- Concrete Optimizer: SGD ---
 class SGD : public Optimizer {
 public:
     SGD(real lr = 0.1) : Optimizer(lr) {}
 
-    // MODIFIED: Takes SparseMatrixType
     void update(SparseMatrixType& weights, View1D biases,
                 const SparseMatrixType& accumulated_d_weights, const View1D& accumulated_d_biases,
                 int batch_size) override {
@@ -90,39 +82,32 @@ public:
         if (batch_size <= 0) {
              throw std::runtime_error("Batch size must be positive for SGD update.");
         }
-        // Check if weights matrix is valid (has non-zeros) before proceeding
         if (weights.numRows() == 0 && biases.extent(0) == 0) {
-             return; // Nothing to update
+             return;
         }
-        // Check dimensions consistency (biases vs weights rows)
         if (weights.numRows() > 0 && weights.numRows() != biases.extent(0)) {
             throw std::runtime_error("SGD update: Mismatch between weights rows and biases size.");
         }
-         // Check added: Ensure dimensions are valid before accessing
         if (biases.extent_int(0) <= 0 && weights.numRows() <= 0) {
-            if (biases.extent(0) == 0 && weights.numRows() == 0) return; // Allow empty update
+            if (biases.extent(0) == 0 && weights.numRows() == 0) return;
              throw std::runtime_error("SGD update called on layer with invalid dimensions.");
         }
 
-
         const real scale = learning_rate / static_cast<real>(batch_size);
-        const int layer_size = biases.extent_int(0); // Number of rows/neurons
+        const int layer_size = biases.extent_int(0);
 
-        // --- Update Weights (Sparse) ---
         auto w_vals = weights.values;
         auto dw_vals = accumulated_d_weights.values;
-        const int nnz = w_vals.extent_int(0); // Number of non-zeros
+        const int nnz = w_vals.extent_int(0);
 
         if (nnz != dw_vals.extent_int(0)) {
              throw std::runtime_error("SGD update: Mismatch in number of non-zeros between weights and gradients.");
         }
 
-        // Update non-zero values of the weights matrix
         Kokkos::parallel_for("sgd_update_weights_sparse", nnz, KOKKOS_LAMBDA(const int k) {
             w_vals(k) -= scale * dw_vals(k);
         });
 
-        // --- Update Biases (Dense - unchanged) ---
         Kokkos::parallel_for("sgd_update_biases", layer_size, KOKKOS_LAMBDA(int i) {
             biases(i) -= scale * accumulated_d_biases(i);
         });
@@ -133,8 +118,6 @@ public:
     }
 };
 
-
-// --- Concrete Optimizer: Adam ---
 class Adam : public Optimizer {
 public:
     real beta1;
@@ -144,15 +127,12 @@ public:
 private:
     // Structure to hold state (m, v, t)
     struct ParameterState {
-        View1D m_1d; // For biases (dense)
-        View1D v_1d; // For biases (dense)
-        // *** REMAINS DENSE FOR NOW *** based on initial decision
-        // If weights become truly sparse later, these might need to become sparse too.
-        Kokkos::View<real**> m_2d; // For weights (dense moments)
-        Kokkos::View<real**> v_2d; // For weights (dense moments)
-        long long t = 0; // Timestep
+        View1D m_1d;
+        View1D v_1d;
+        Kokkos::View<real**> m_2d;
+        Kokkos::View<real**> v_2d;
+        long long t = 0;
 
-        // Constructor for biases state
         ParameterState(size_t size) : t(0) {
             if (size > std::numeric_limits<int>::max()) {
                  throw std::runtime_error("Adam state bias size exceeds limits.");
@@ -321,7 +301,6 @@ public:
      virtual ~Adam() override = default;
 };
 
-
 // --- Classes Activation (inchangées) ---
 class Activation {
 public:
@@ -405,7 +384,6 @@ std::unique_ptr<Activation> create_activation(const std::string& type) {
     if (type == "linear") return std::make_unique<LinearActivation>();
     throw std::runtime_error("Unknown activation type: " + type);
 }
-
 
 // --- Classe Layer (MODIFIED for Sparse Weights) ---
 class Layer {
@@ -739,8 +717,6 @@ public:
     Layer& operator=(const Layer&) = delete;
     virtual ~Layer() = default;
 };
-
-
 // --- Classe InputLayer (inchangée, hérite de Layer modifié) ---
 class InputLayer : public Layer {
 public:
@@ -846,7 +822,6 @@ public:
 // --- Classes Dataset / BatchHandler (Placeholders inchangés) ---
 class Dataset {};
 class BatchHandler {};
-
 
 // --- Classe Network (Utilise Layer modifié, logic inchangée) ---
 class Network {
@@ -1012,7 +987,6 @@ public:
     Network& operator=(const Network&) = delete;
     virtual ~Network() = default;
 };
-
 
 // --- Fonctions d'entraînement (XOR, Sine, Linear Separation) ---
 // *** AUCUNE MODIFICATION NÉCESSAIRE ICI ***
@@ -1293,7 +1267,6 @@ void linear_sep_train(const std::string& optimizer_choice = "adam") {
     std::cout << "Final Accuracy: " << std::fixed << std::setprecision(4) << accuracy * 100.0 << "%" << std::endl;
 }
 
-
 // --- Main (inchangé) ---
 int main(int argc, char* argv[]) {
     Kokkos::initialize(argc, argv);
@@ -1326,3 +1299,12 @@ int main(int argc, char* argv[]) {
     Kokkos::finalize();
     return 0;
 }
+
+
+
+
+
+
+
+
+
