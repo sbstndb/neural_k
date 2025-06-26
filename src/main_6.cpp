@@ -303,6 +303,23 @@ public:
     virtual void apply_derivative(const View1D& input_z, View1D& output_deriv) const = 0;
 };
 
+class LinearActivation : public Activation {
+public:
+    void apply(const View1D& input, View1D& output) const override {
+        // output(i) = input(i) -> Just copy
+        Kokkos::deep_copy(output, input);
+    }
+    void apply_derivative(const View1D& input_z, View1D& output_deriv) const override {
+        // f'(z) = 1
+        const int size = input_z.extent(0);
+         Kokkos::parallel_for("linear_deriv", size, KOKKOS_LAMBDA(const int i) {
+             if (i < output_deriv.extent(0)) { // Bounds check
+                output_deriv(i) = 1.0f;
+             }
+        });
+    }
+};
+
 class RELU : public Activation {
 public:
     void apply(const View1D& input, View1D& output) const override {
@@ -375,6 +392,7 @@ std::unique_ptr<Activation> create_activation(const std::string& type) {
     if (type == "relu") return std::make_unique<RELU>();
     if (type == "sigmoid") return std::make_unique<SIGMOID>();
     if (type == "tanh") return std::make_unique<TANH>();
+    if (type == "linear") return std::make_unique<LinearActivation>();
     throw std::runtime_error("Unknown activation type: " + type);
 }
 
@@ -450,12 +468,26 @@ public:
 
     // --- Méthodes ---
     virtual void forward(const View1D& prev_layer_a) {
-        if (!activation || input_size == 0) return; // Ne rien faire pour InputLayer
+        if (input_size == 0) return; // InputLayer or uninitialized
+
+        // Handle case where activation might be null (e.g., conceptual Linear output)
+        // Though we added LinearActivation, this makes it safer
+        if (!activation) {
+             // Treat as linear: z = W * prev_layer_a + b; a = z
+             KokkosBlas::gemv("N", 1.0, weights, prev_layer_a, 0.0, z);
+             Kokkos::parallel_for("add_biases_linear", layer_size, KOKKOS_LAMBDA(int i) {
+                 z(i) += biases(i);
+             });
+             Kokkos::deep_copy(a, z); // a = z
+             return;
+        }
 
         // 1. z = W * prev_layer_a + b
         KokkosBlas::gemv("N", 1.0, weights, prev_layer_a, 0.0, z);
         Kokkos::parallel_for("add_biases", layer_size, KOKKOS_LAMBDA(int i) {
-            z(i) += biases(i);
+            if (i < z.extent(0) && i < biases.extent(0)) { // Bounds check
+                z(i) += biases(i);
+            }
         });
 
         // 2. a = activation(z)
@@ -463,13 +495,18 @@ public:
     }
 
     virtual void compute_gradients(const Layer& next_layer, const View1D& prev_layer_a) {
-         if (!activation || input_size == 0) return; // Ne rien faire pour InputLayer
+         if (input_size == 0) return; // InputLayer or uninitialized
 
-        // 1. Calculer f'(z)
-        activation->apply_derivative(z, tmp_deriv);
+         // Calculate f'(z) - Handle null activation case (linear)
+        if (activation) {
+             activation->apply_derivative(z, tmp_deriv);
+        } else {
+            // Derivative of linear activation is 1
+            Kokkos::deep_copy(tmp_deriv, 1.0f);
+        }
+
 
         // 2. Calculer delta : δ_l = (W_{l+1}^T * δ_{l+1}) .* f'(z_l)
-        // Utiliser une vue temporaire pour W^T * delta_next pour éviter d'écraser delta avant multiplication
         View1D delta_prop("delta_prop", layer_size);
         KokkosBlas::gemv("T", 1.0, next_layer.weights, next_layer.delta, 0.0, delta_prop);
          Kokkos::parallel_for("hadamard_delta_deriv", layer_size, KOKKOS_LAMBDA(int i) {
@@ -484,7 +521,6 @@ public:
              Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0,0}, {layer_size, input_size}),
              KOKKOS_LAMBDA(const int i, const int j) {
                  if (i < d_weights.extent(0) && j < d_weights.extent(1)) { // Bounds check
-                     // dW_ij = delta_i * a_prev_j
                     d_weights(i, j) = delta(i) * prev_layer_a(j);
                  }
         });
@@ -495,10 +531,6 @@ public:
             Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0,0}, {layer_size, input_size}),
             KOKKOS_LAMBDA (const int i, const int j) {
                  if (i < d_weights_sum.extent(0) && j < d_weights_sum.extent(1)) { // Bounds check
-                    // Utilisation atomique si plusieurs threads pouvaient mettre à jour la même somme
-                    // Pour le parcours séquentiel des samples dans la boucle principale, non strict. nécessaire ici
-                    // Mais Kokkos peut paralléliser la boucle interne de compute_gradients si le backend le permet
-                    // Utilisons atomic_add pour la sécurité.
                     Kokkos::atomic_add(&d_weights_sum(i, j), d_weights(i, j));
                  }
          });
@@ -568,7 +600,7 @@ public:
      }
 };
 
-// --- Classe OutputLayer (inchangée par rapport à la version précédente) ---
+// --- Classe OutputLayer (modifiée pour gérer activation linéaire via compute_gradients) ---
 class OutputLayer : public Layer {
 public:
     OutputLayer(int _input_size, int _layer_size, std::unique_ptr<Activation> act_func) :
@@ -576,18 +608,24 @@ public:
 
     // Calcule les gradients pour la couche de sortie
     void compute_gradients(const View1D& target, const View1D& prev_layer_a) {
-         if (!activation) return;
+         // Pas besoin de vérifier !activation ici car Layer::compute_gradients le ferait,
+         // mais on le fait spécifiquement pour la partie delta_L = (a_L - y) * f'(z_L)
          if (target.extent(0) != layer_size) {
              throw std::runtime_error("Target size mismatch for OutputLayer gradient calculation.");
          }
 
-
-        // 1. Calculer f'(z)
-        activation->apply_derivative(z, tmp_deriv);
+        // 1. Calculer f'(z) - Géré dans la boucle delta
+        if (activation) {
+            activation->apply_derivative(z, tmp_deriv);
+        } else {
+             // Assume linear if activation is null
+            Kokkos::deep_copy(tmp_deriv, 1.0f);
+        }
 
         // 2. Calculer delta : δ_L = (a_L - y) .* f'(z_L)
         Kokkos::parallel_for("compute_output_delta", layer_size, KOKKOS_LAMBDA(int i) {
              if (i < delta.extent(0)) { // Bounds check
+                // tmp_deriv contient soit la dérivée réelle soit 1.0f (pour linéaire)
                 delta(i) = (a(i) - target(i)) * tmp_deriv(i);
              }
         });
@@ -784,6 +822,10 @@ public:
     virtual ~Network() = default;
 };
 
+
+
+
+
 // --- Fonction d'entraînement XOR (adaptée pour choisir l'optimizer) ---
 void xor_train(const std::string& optimizer_choice = "adam") {
     std::cout << "\n--- XOR Training Example ---" << std::endl;
@@ -792,11 +834,14 @@ void xor_train(const std::string& optimizer_choice = "adam") {
     // Structure du réseau
     std::map<int, int> sizes;
     sizes[0] = 2; // Input
-    sizes[1] = 5; // Hidden 1 (Un peu plus de neurones peuvent aider XOR)
-    sizes[2] = 1; // Output
+    sizes[1] = 10000; // Hidden 1 (Un peu plus de neurones peuvent aider XOR)
+    sizes[2] = 10000 ; 
+    sizes[3] = 10000 ; 
+    sizes[4] = 1; // Output
 
     // Sigmoid ou Tanh sont souvent utilisés pour XOR avec une seule couche cachée
-    std::vector<std::string> activations = {"tanh", "tanh"}; // H1, Out
+    std::vector<std::string> activations = {"relu", "relu", "relu", "sigmoid"}; // H1, Out
+//    std::vector<std::string> activations = {"tanh", "tanh", "tanh", "sigmoid"}; // H1, Out
 
     // Paramètres d'entraînement (peuvent nécessiter ajustement selon l'optimizer)
     real learning_rate;
@@ -806,12 +851,12 @@ void xor_train(const std::string& optimizer_choice = "adam") {
     // Créer l'optimizer choisi
     std::unique_ptr<Optimizer> optimizer;
     if (optimizer_choice == "sgd") {
-        learning_rate = 0.1; // SGD peut nécessiter un LR plus élevé
-        epochs = 60000;
+        learning_rate = 1.5; // SGD peut nécessiter un LR plus élevé
+        epochs = 600;
         optimizer = std::make_unique<SGD>(learning_rate);
     } else if (optimizer_choice == "adam") {
-        learning_rate = 0.01; // Adam a souvent besoin d'un LR plus faible
-        epochs = 15000;       // Adam converge souvent plus vite
+        learning_rate = 0.001; // Adam a souvent besoin d'un LR plus faible
+        epochs = 1500;       // Adam converge souvent plus vite
         optimizer = std::make_unique<Adam>(learning_rate, 0.9, 0.999, 1e-8);
     } else {
         throw std::runtime_error("Unknown optimizer choice: " + optimizer_choice);
@@ -860,7 +905,7 @@ void xor_train(const std::string& optimizer_choice = "adam") {
 
         // Afficher le coût moyen de l'époque
         real avg_cost = total_epoch_cost / num_samples;
-        if ((epoch + 1) % (epochs / 10) == 0 || epoch == 0 || epoch == epochs -1) { // Affichage ~10 fois
+        if ((epoch + 1) % (epochs / 100) == 0 || epoch == 0 || epoch == epochs -1) { // Affichage ~10 fois
             std::cout << "Epoch: " << std::setw(6) << epoch + 1
                       << ", Average Cost: " << std::fixed << std::setprecision(8)
                       << avg_cost << std::endl;
@@ -912,11 +957,16 @@ int main(int argc, char* argv[]) {
 
             // Lancer l'entraînement avec Adam par défaut
             xor_train("adam");
-
             std::cout << "\n---------------------------\n" << std::endl;
-
              // Lancer l'entraînement avec SGD pour comparaison
              xor_train("sgd");
+
+            std::cout << "\n---------------------------\n" << std::endl;
+	    sine_train("adam") ; 
+
+            std::cout << "\n---------------------------\n" << std::endl;
+	     linear_sep_train("adam") ;	    
+
 
         } catch (const std::exception& e) {
             std::cerr << "Error: " << e.what() << std::endl;

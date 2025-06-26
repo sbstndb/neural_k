@@ -14,7 +14,6 @@
 #include <Kokkos_Random.hpp>
 #include <KokkosBlas.hpp>
 
-#include "../external/HighFive/include/highfive/highfive.hpp"
 
 using real = float;
 using View1D = Kokkos::View<real *  >;
