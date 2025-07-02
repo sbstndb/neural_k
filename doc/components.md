@@ -1,4 +1,16 @@
 # Composants techniques
+Cette page présente les principales briques logicielles de Neural K et fournit de courts extraits pour illustrer leur utilisation.
+
+## Types et conventions (`types.hpp`)
+
+| Nom | Définition | Commentaire |
+|-----|------------|-------------|
+| `real` | `using real = float;` | Précision simple pour accélérer les calculs. |
+| `View1D` | `Kokkos::View<real*>` | Vecteur dense sur l'espace d'exécution par défaut. |
+| `SparseMatrixType` | `KokkosSparse::CrsMatrix<Scalar, Ordinal, Device, void, Offset>` | Matrice creuse CSR (graph + valeurs). |
+| `GraphType` | Alias interne au CSR | Contient `row_map` & `entries`. |
+
+Le projet utilise `Kokkos::DefaultExecutionSpace` pour être portable CPU/GPU et `Kokkos::LayoutLeft` pour un mapping mémoire column-major cohérent avec les kernels BLAS.
 
 ## Activations (`activations.*`)
 
@@ -41,6 +53,8 @@ output_deriv(i) = s * (1.0f - s);
 ```
 
 ## Optimiseurs (`optimizers.*`)
+
+Les optimiseurs contrôlent la mise à jour des paramètres du réseau. Les implémentations fournies (SGD, Adam) couvrent la majorité des usages, mais l'interface reste ouverte pour en ajouter d'autres.
 
 ### Classe de base
 
@@ -126,6 +140,8 @@ KOKKOS_LAMBDA (const int i) {
 ```
 
 ## Couches (`layers.*`)
+
+Les couches encapsulent les calculs forward/backward et le stockage des gradients. En les chaînant, on définit l'architecture du réseau.
 
 ### Structure des données
 
@@ -307,4 +323,19 @@ network.apply_pruning_with_retraining(0.05, 100);
 
 // Rapport
 network.sparsity_report();
-``` 
+```
+
+## Entraînement (`training.*`)
+
+Les fonctions d'entraînement génériques se trouvent dans `training.cpp` :
+- `generic_train_network()` gère la boucle (forward, backward, update) et le *shuffling* des indices.
+- `generic_evaluate_network()` calcule coût et précision sur le jeu de test.
+- Des helpers `get_*_config()` retournent un `TrainingConfig` qui encapsule les hyperparamètres.
+
+Pour activer la sparsité dynamique lors de l'entraînement :
+```cpp
+TrainingConfig cfg = get_xor_dynamic_sparsity_config();
+cfg.enable_dynamic_sparsity = true;
+Network net(cfg.network_sizes, cfg.activations, create_optimizer("adam", cfg));
+```
+Le réseau appellera périodiquement `apply_threshold_sparsity_silent()` selon la fréquence définie. 

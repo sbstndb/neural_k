@@ -1,4 +1,5 @@
 # Guide d'utilisation
+Ce guide pas-à-pas explique comment créer, entraîner puis évaluer un réseau avec Neural K. Les extraits de code peuvent être copiés tels quels et adaptés à vos données.
 
 ## Création d'un réseau de neurones
 
@@ -239,4 +240,28 @@ network.apply_progressive_pruning(0.01, 0.05, 10);
 
 // Réentraînement après pruning
 network.apply_pruning_with_retraining(0.05, 50);
-``` 
+```
+
+### Sparsité dynamique pendant l'entraînement
+
+```cpp
+TrainingConfig cfg = get_xor_dynamic_sparsity_config();
+cfg.enable_dynamic_sparsity = true;      // Activer
+cfg.sparsity_threshold   = 0.02;         // Seuil pour mettre à zéro
+cfg.sparsity_frequency   = 20;           // Toutes les 20 épochs
+cfg.sparsity_start_epoch = 50;           // À partir de l'epoch 50
+
+auto optimizer = create_optimizer("adam", cfg);
+Network network(cfg.network_sizes, cfg.activations, std::move(optimizer));
+
+// Boucle d'entraînement générique
+std::mt19937 gen(42);
+TrainingData data = generate_xor_data(gen);
+generic_train_network(network, data, cfg, "adam", gen);
+```
+
+## Ressources complémentaires
+
+• `components.md` : détails API des activations, optimiseurs et couches.
+• `architecture.md` : vue d'ensemble des dépendances et choix de conception.
+• `examples.md` : cas concrets montrant la configuration complète d'expériences. 

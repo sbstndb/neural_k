@@ -1,4 +1,12 @@
 # Exemples d'entraînement
+Cette section regroupe plusieurs scénarios afin de démontrer la flexibilité de Neural K sur des tâches de classification et de régression.
+
+Les exemples inclus :
+- XOR (classification binaire)
+- Approximation de sin(x) (régression)
+- Séparation linéaire (classification linéaire)
+
+Chaque exemple suit la même structure : génération de données, définition du réseau, entraînement puis évaluation.
 
 ## 1. XOR - Problème non-linéaire classique
 

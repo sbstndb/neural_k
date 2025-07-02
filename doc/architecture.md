@@ -1,5 +1,7 @@
 # Architecture du système
 
+Ce document explique l'architecture globale de Neural K. Vous y découvrirez comment les différents modules s'enchaînent, depuis la définition des types jusqu'au point d'entrée.
+
 ## Vue d'ensemble
 
 Neural K utilise une architecture modulaire basée sur Kokkos pour maximiser les performances sur différentes plateformes (CPU, GPU, etc.).
@@ -92,6 +94,19 @@ La classe `Network` orchestre tous les composants :
 std::unique_ptr<Activation> create_activation(const std::string& type);
 ```
 
+## Flux d'entraînement
+
+Le cycle complet d'entraînement est implémenté dans `training.cpp` :
+1. Génération ou chargement des données dans des vues Kokkos host puis copie vers le device.
+2. Boucle `generic_train_network` qui :
+   • fait un passage *forward* puis *backward* pour chaque échantillon d'un batch,
+   • accumule les gradients dans chaque couche (`d_*_sum`),
+   • déclenche `network.update()` pour appliquer l'optimiseur choisi.
+3. Affichage simplifié de la progression toutes les 50 épochs via `print_progress`.
+4. Critère d'arrêt : coût moyen `< convergence_threshold` défini dans la configuration.
+
+La configuration (tailles, activations, epochs, batch size, etc.) est décrite dans des structs `TrainingConfig` spécifiques à chaque exemple (XOR, sinus, etc.).
+
 ## Gestion mémoire et performance
 
 ### Matrices creuses
@@ -144,3 +159,7 @@ Neural K prend désormais en charge des stratégies de sparsité **dynamiques** 
 * Statistiques détaillées : `sparsity_report()`, `compute_sparsity_stats()`
 
 Ces outils fonctionnent directement sur le format CSR et sont compatibles avec toutes les opérations KokkosSparse. 
+
+## Aller plus loin
+
+Pour approfondir l'implémentation, référez-vous aux sources listées dans le diagramme de dépendances. Le document `components.md` dresse l'inventaire API tandis que `usage.md` illustre pas-à-pas l'entraînement. Enfin, `examples.md` montre des cas réels d'application. 
