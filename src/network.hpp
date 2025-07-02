@@ -65,4 +65,9 @@ public:
     
     // Calcule et affiche les statistiques de sparsité réelle
     void compute_sparsity_stats() const;
+    
+    // === NOUVELLE MÉTHODE : SPARSITÉ AVEC MASQUE PERMANENT ===
+    
+    // Applique la sparsité avec masque permanent (empêche la récupération)
+    void apply_permanent_sparsity(real threshold);
 }; 

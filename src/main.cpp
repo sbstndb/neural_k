@@ -56,8 +56,8 @@ int main(int argc, char* argv[]) {
             gaussian_clusters_train("adam");
 
             // Démonstration 6: Prédiction séries temporelles 
-            print_demo_separator(6, "SERIES TEMPORELLES");
-            time_series_train("adam");
+            //print_demo_separator(6, "SERIES TEMPORELLES");
+            //time_series_train("adam");
 
             // Démonstration 7: NOUVELLE - Test de sparsité
             print_demo_separator(7, "SPARSITÉ POST-ENTRAÎNEMENT");
@@ -66,6 +66,14 @@ int main(int argc, char* argv[]) {
             // Démonstration 8: NOUVELLE - Test de sparsité sur sinus
             print_demo_separator(8, "SPARSITÉ SINUS - RÉGRESSION");
             test_sparsity_sine("adam", 0.005); // Seuil plus fin pour régression
+
+            // Démonstration 9: NOUVELLE - Sparsité dynamique XOR
+            print_demo_separator(9, "SPARSITÉ DYNAMIQUE - XOR");
+            test_dynamic_sparsity_xor("adam");
+
+            // Démonstration 10: NOUVELLE - Sparsité dynamique SINUS
+            print_demo_separator(10, "SPARSITÉ DYNAMIQUE - SINUS");
+            test_dynamic_sparsity_sine("adam");
 
         } catch (const std::exception& e) {
             std::cerr << "\nERREUR CRITIQUE:" << std::endl;
