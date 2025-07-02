@@ -1,5 +1,6 @@
 #include "network.hpp"
 #include "activations.hpp"
+#include "sparsity_controller.hpp"
 
 // Constructor
 Network::Network(const std::map<int, int>& _layer_sizes_map,
@@ -154,96 +155,24 @@ void Network::show() const {
 // === IMPLEMENTATION DES NOUVELLES METHODES DE SPARSITÉ ===
 
 void Network::apply_threshold_sparsity(real threshold) {
-    std::cout << "\n=== APPLICATION DE LA SPARSITÉ PAR SEUIL ===" << std::endl;
-    std::cout << "Seuil appliqué: " << threshold << std::endl;
-    
-    int total_weights_zeroed = 0;
-    int total_weights = 0;
-    
-    // Appliquer aux couches cachées
-    for (auto& layer : hidden_layers) {
-        if (layer.input_size > 0) {
-            auto w_vals = layer.weights.values;
-            int nnz = w_vals.extent_int(0);
-            total_weights += nnz;
-            
-            // Compter et mettre à zéro les poids sous le seuil
-            int layer_weights_zeroed = 0;
-            Kokkos::parallel_reduce("apply_threshold_sparse", nnz, 
-                KOKKOS_LAMBDA(const int k, int& local_count) {
-                    if (Kokkos::abs(w_vals(k)) < threshold) {
-                        w_vals(k) = 0.0;
-                        local_count++;
-                    }
-                }, layer_weights_zeroed);
-            
-            total_weights_zeroed += layer_weights_zeroed;
-            std::cout << "Couche cachée: " << layer_weights_zeroed << "/" << nnz 
-                      << " poids supprimés (" 
-                      << std::fixed << std::setprecision(1) 
-                      << (100.0 * layer_weights_zeroed / nnz) << "%)" << std::endl;
-        }
-    }
-    
-    // Appliquer à la couche de sortie
-    if (output_layer.input_size > 0) {
-        auto w_vals = output_layer.weights.values;
-        int nnz = w_vals.extent_int(0);
-        total_weights += nnz;
-        
-        int layer_weights_zeroed = 0;
-        Kokkos::parallel_reduce("apply_threshold_output_sparse", nnz, 
-            KOKKOS_LAMBDA(const int k, int& local_count) {
-                if (Kokkos::abs(w_vals(k)) < threshold) {
-                    w_vals(k) = 0.0;
-                    local_count++;
-                }
-            }, layer_weights_zeroed);
-        
-        total_weights_zeroed += layer_weights_zeroed;
-        std::cout << "Couche sortie: " << layer_weights_zeroed << "/" << nnz 
-                  << " poids supprimés (" 
-                  << std::fixed << std::setprecision(1) 
-                  << (100.0 * layer_weights_zeroed / nnz) << "%)" << std::endl;
-    }
-    
-    real sparsity_percentage = (100.0 * total_weights_zeroed) / total_weights;
-    std::cout << "\nRÉSULTAT GLOBAL:" << std::endl;
-    std::cout << "- Total poids supprimés: " << total_weights_zeroed << "/" << total_weights << std::endl;
-    std::cout << "- Taux de sparsité: " << std::fixed << std::setprecision(2) 
-              << sparsity_percentage << "%" << std::endl;
-    std::cout << "===============================================\n" << std::endl;
+    // Délégation à la stratégie dédiée pour limiter les responsabilités
+    ThresholdSparsityStrategy(threshold).apply(*this);
 }
 
 // Version silencieuse pour l'entraînement
 void Network::apply_threshold_sparsity_silent(real threshold) {
-    // Appliquer aux couches cachées
-    for (auto& layer : hidden_layers) {
-        if (layer.input_size > 0) {
-            auto w_vals = layer.weights.values;
-            int nnz = w_vals.extent_int(0);
-            
-            Kokkos::parallel_for("apply_threshold_sparse_silent", nnz, 
-                KOKKOS_LAMBDA(const int k) {
-                    if (Kokkos::abs(w_vals(k)) < threshold) {
-                        w_vals(k) = 0.0;
-                    }
-                });
-        }
-    }
-    
-    // Appliquer à la couche de sortie
-    if (output_layer.input_size > 0) {
-        auto w_vals = output_layer.weights.values;
+    // Utilise le helper générique pour parcourir les couches sans affichage
+    for_each_trainable_layer([&](Layer& layer, bool /*is_output*/, size_t /*idx*/) {
+        auto w_vals = layer.weights.values;
         int nnz = w_vals.extent_int(0);
-        
-        Kokkos::parallel_for("apply_threshold_output_sparse_silent", nnz, 
+
+        Kokkos::parallel_for("apply_threshold_sparse_silent_generic", nnz,
             KOKKOS_LAMBDA(const int k) {
                 if (Kokkos::abs(w_vals(k)) < threshold) {
                     w_vals(k) = 0.0;
                 }
             });
-    }
+    });
 }
 
 void Network::compute_sparsity_stats() const {
@@ -1271,4 +1200,19 @@ void Network::apply_pruning_with_regrowth(real prune_threshold, real regrow_thre
     
     std::cout << "Pruning avec croissance terminé!" << std::endl;
     std::cout << "==============================\n" << std::endl;
-} 
+}
+
+// === GESTION DES STRATÉGIES DE SPARSITÉ ===
+void Network::add_sparsity_strategy(std::unique_ptr<ISparsityStrategy> strat) {
+    if (strat) {
+        sparsity_strategies.push_back(std::move(strat));
+    }
+}
+
+void Network::apply_sparsity_strategies() {
+    for (auto& strat : sparsity_strategies) {
+        if (strat) strat->apply(*this);
+    }
+}
+
+Network::~Network() = default; 

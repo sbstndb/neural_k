@@ -34,6 +34,7 @@ add_executable(nk
     src/layers.cpp
     src/network.cpp
     src/training.cpp
+    src/sparsity_controller.cpp
 )
 target_link_libraries(nk Kokkos::kokkos Kokkos::kokkoskernels)
 

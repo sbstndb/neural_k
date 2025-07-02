@@ -3,6 +3,11 @@
 #include "types.hpp"
 #include "layers.hpp"
 #include "optimizers.hpp"
+#include <vector>
+#include <memory>
+
+// Forward declaration pour éviter inclusion circulaire
+class ISparsityStrategy;
 
 // --- Classes Dataset / BatchHandler (Placeholders) ---
 class Dataset {};
@@ -59,12 +64,21 @@ public:
     // Display Network Info
     void show() const;
 
+    // === GESTION DES STRATÉGIES DE SPARSITÉ ===
+    void add_sparsity_strategy(std::unique_ptr<ISparsityStrategy> strat);
+    void apply_sparsity_strategies();
+
+    template <typename Func>
+    void iterate_trainable_layers(Func&& func) {
+        for_each_trainable_layer(std::forward<Func>(func));
+    }
+
     // Move/Copy Semantics
     Network(Network&&) = default;
     Network& operator=(Network&&) = default;
     Network(const Network&) = delete;
     Network& operator=(const Network&) = delete;
-    virtual ~Network() = default;
+    virtual ~Network();
     
     // === NOUVELLES METHODES POUR LA SPARSITÉ ===
     
@@ -161,4 +175,22 @@ private:
     std::vector<SparsityMask> hidden_layer_masks;
     SparsityMask output_layer_mask{0}; // Initialisation par défaut
     bool masks_created = false;
+
+    // Nouveau : stockage des stratégies
+    std::vector<std::unique_ptr<ISparsityStrategy>> sparsity_strategies;
+
+    // === Helper interne : itérer sur toutes les couches entraînables ===
+    template <typename Func>
+    void for_each_trainable_layer(Func&& func) {
+        size_t idx = 0;
+        for (Layer& layer : hidden_layers) {
+            if (layer.input_size > 0) {
+                func(layer, /*is_output=*/false, idx);
+                ++idx;
+            }
+        }
+        if (output_layer.input_size > 0) {
+            func(static_cast<Layer&>(output_layer), /*is_output=*/true, idx);
+        }
+    }
 }; 
