@@ -11,10 +11,6 @@ void spiral_train(const std::string& optimizer_choice = "adam");
 void gaussian_clusters_train(const std::string& optimizer_choice = "adam");
 void time_series_train(const std::string& optimizer_choice = "adam");
 
-// Fonction de test avec sparsité
-void test_sparsity_xor(const std::string& optimizer_choice = "adam", real sparsity_threshold = 0.01);
-void test_sparsity_sine(const std::string& optimizer_choice = "adam", real sparsity_threshold = 0.01);
-
 // Fonctions de test avec sparsité dynamique
 void test_dynamic_sparsity_xor(const std::string& optimizer_choice = "adam");
 void test_dynamic_sparsity_sine(const std::string& optimizer_choice = "adam");

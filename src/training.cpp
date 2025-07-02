@@ -288,7 +288,7 @@ TrainingConfig get_xor_config() {
     return {
         "XOR", "Classification binaire non-lineaire (XOR)",
         {{0, 2}, {1, 20}, {2, 10}, {3, 1}}, {"relu", "relu", "sigmoid"},
-        0.3, 800, 0.01, 400, 4, 4, 1e-6, 20
+        0.3, 1200, 0.01, 800, 4, 4, 1e-8, 25  // Époques augmentées : SGD 800→1200, Adam 400→800, seuil 1e-6→1e-8
     };
 }
 
@@ -296,7 +296,7 @@ TrainingConfig get_sine_config() {
     return {
         "SINUS", "Regression - Approximation de sin(x)",
         {{0, 1}, {1, 16}, {2, 16}, {3, 1}}, {"relu", "relu", "linear"},
-        0.02, 300, 0.001, 400, 16, 1024, 1e-7, 20
+        0.02, 600, 0.001, 800, 16, 1024, 1e-9, 25  // Époques augmentées : SGD 300→600, Adam 400→800, seuil 1e-7→1e-9
     };
 }
 
@@ -304,7 +304,7 @@ TrainingConfig get_linear_config() {
     return {
         "SEPARATION LINEAIRE", "Classification binaire - Separation lineaire",
         {{0, 2}, {1, 1}}, {"sigmoid"},
-        0.1, 60, 0.01, 80, 16, 800, 1e-5, 10
+        0.1, 120, 0.01, 160, 16, 800, 1e-7, 15  // Époques augmentées : SGD 60→120, Adam 80→160, seuil 1e-5→1e-7
     };
 }
 
@@ -314,11 +314,11 @@ TrainingConfig get_xor_dynamic_sparsity_config() {
     return {
         "XOR DYNAMIQUE", "XOR avec sparsité dynamique pendant l'entraînement",
         {{0, 2}, {1, 20}, {2, 10}, {3, 1}}, {"relu", "relu", "sigmoid"},
-        0.3, 1000, 0.01, 800, 4, 4, 1e-6, 25,  // Époques augmentées : SGD 800→1000, Adam 600→800
+        0.3, 1500, 0.01, 1200, 4, 4, 1e-8, 30,  // Époques augmentées : SGD 1000→1500, Adam 800→1200, seuil 1e-6→1e-8
         true,  // enable_dynamic_sparsity
-        0.025, // sparsity_threshold augmenté : 0.01 → 0.025
-        40,    // sparsity_frequency réduite : 50 → 40 (plus fréquent)
-        80     // sparsity_start_epoch réduit : 100 → 80 (commence plus tôt)
+        0.025, // sparsity_threshold
+        40,    // sparsity_frequency
+        80     // sparsity_start_epoch
     };
 }
 
@@ -326,11 +326,11 @@ TrainingConfig get_sine_dynamic_sparsity_config() {
     return {
         "SINUS DYNAMIQUE", "Sinus avec sparsité dynamique pendant l'entraînement",
         {{0, 1}, {1, 24}, {2, 24}, {3, 1}}, {"relu", "relu", "linear"},
-        0.02, 600, 0.001, 700, 16, 1024, 1e-7, 25,  // Époques augmentées : SGD 400→600, Adam 500→700  
+        0.02, 900, 0.001, 1200, 16, 1024, 1e-9, 30,  // Époques augmentées : SGD 600→900, Adam 700→1200, seuil 1e-7→1e-9
         true,  // enable_dynamic_sparsity
-        0.015, // sparsity_threshold augmenté : 0.005 → 0.015 (3x plus agressif)
-        30,    // sparsity_frequency réduite : 40 → 30 (plus fréquent)
-        60     // sparsity_start_epoch réduit : 80 → 60 (commence plus tôt)
+        0.015, // sparsity_threshold
+        30,    // sparsity_frequency
+        60     // sparsity_start_epoch
     };
 }
 
@@ -441,7 +441,7 @@ TrainingConfig get_spiral_config() {
     return {
         "SPIRALES", "Classification multi-classes - Motifs en spirale (3 classes)",
         {{0, 2}, {1, 50}, {2, 25}, {3, 3}}, {"relu", "relu", "sigmoid"},
-        0.3, 400, 0.005, 300, 32, 900, 1e-4, 20
+        0.3, 800, 0.005, 600, 32, 900, 1e-6, 25  // Époques augmentées : SGD 400→800, Adam 300→600, seuil 1e-4→1e-6
     };
 }
 
@@ -483,7 +483,7 @@ TrainingConfig get_gaussian_config() {
     return {
         "CLUSTERS GAUSSIENS", "Classification multi-classes - Clusters gaussiens (4 classes)",
         {{0, 2}, {1, 40}, {2, 30}, {3, 4}}, {"relu", "relu", "sigmoid"},
-        0.4, 300, 0.008, 200, 40, 800, 1e-4, 20
+        0.4, 600, 0.008, 400, 40, 800, 1e-6, 25  // Époques augmentées : SGD 300→600, Adam 200→400, seuil 1e-4→1e-6
     };
 }
 
@@ -524,7 +524,7 @@ TrainingConfig get_timeseries_config() {
     return {
         "SERIES TEMPORELLES", "Regression sequentielle - Prediction de series temporelles",
         {{0, 10}, {1, 40}, {2, 30}, {3, 20}, {4, 10}, {5, 1}}, {"relu", "relu", "relu", "relu", "linear"},
-        0.01, 500, 0.005, 500, 10, 2000, 1e-5, 20
+        0.01, 1000, 0.005, 1000, 10, 2000, 1e-7, 25  // Époques augmentées : SGD 500→1000, Adam 500→1000, seuil 1e-5→1e-7
     };
 }
 
@@ -579,74 +579,6 @@ void spiral_train(const std::string& optimizer_choice) {
 void time_series_train(const std::string& optimizer_choice) {
     auto config = get_timeseries_config();
     run_simple_test(config, [&config](std::mt19937& gen) { return generate_timeseries_data(config.num_samples, gen); }, optimizer_choice);
-}
-
-// === NOUVELLE FONCTION : TEST AVEC SPARSITÉ ===
-
-void test_sparsity_xor(const std::string& optimizer_choice, real sparsity_threshold) {
-    print_separator("TEST DE SPARSITÉ - XOR", '=', 80);
-    std::cout << "Probleme: XOR avec application de sparsité post-entraînement" << std::endl;
-    std::cout << "Optimiseur: " << optimizer_choice << std::endl;
-    std::cout << "Seuil de sparsité: " << sparsity_threshold << std::endl;
-
-    auto config = get_xor_config();
-    auto optimizer = create_optimizer(optimizer_choice, config);
-    Network network(config.network_sizes, config.activations, std::move(optimizer));
-    
-    print_network_architecture(network);
-    
-    // Afficher l'état initial (pas de sparsité)
-    network.compute_sparsity_stats();
-
-    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
-    auto data = generate_xor_data(gen);
-    
-    // Entraînement normal
-    generic_train_network(network, data, config, optimizer_choice, gen);
-    generic_evaluate_network(network, data, "XOR AVANT SPARSITÉ");
-    
-    // Appliquer la sparsité
-    network.apply_threshold_sparsity(sparsity_threshold);
-    
-    // Vérifier l'état après sparsité
-    network.compute_sparsity_stats();
-    
-    // Tester les performances après sparsité
-    print_section_header("ÉVALUATION APRÈS SPARSITÉ", '=', 70);
-    generic_evaluate_network(network, data, "XOR APRÈS SPARSITÉ");
-}
-
-void test_sparsity_sine(const std::string& optimizer_choice, real sparsity_threshold) {
-    print_separator("TEST DE SPARSITÉ - SINUS", '=', 80);
-    std::cout << "Probleme: Régression sinus avec application de sparsité post-entraînement" << std::endl;
-    std::cout << "Optimiseur: " << optimizer_choice << std::endl;
-    std::cout << "Seuil de sparsité: " << sparsity_threshold << std::endl;
-
-    auto config = get_sine_config();
-    auto optimizer = create_optimizer(optimizer_choice, config);
-    Network network(config.network_sizes, config.activations, std::move(optimizer));
-    
-    print_network_architecture(network);
-    
-    // Afficher l'état initial (pas de sparsité)
-    network.compute_sparsity_stats();
-
-    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
-    auto data = generate_sine_data(config.num_samples, gen);
-    
-    // Entraînement normal
-    generic_train_network(network, data, config, optimizer_choice, gen);
-    generic_evaluate_network(network, data, "SINUS AVANT SPARSITÉ");
-    
-    // Appliquer la sparsité
-    network.apply_threshold_sparsity(sparsity_threshold);
-    
-    // Vérifier l'état après sparsité
-    network.compute_sparsity_stats();
-    
-    // Tester les performances après sparsité
-    print_section_header("ÉVALUATION APRÈS SPARSITÉ", '=', 70);
-    generic_evaluate_network(network, data, "SINUS APRÈS SPARSITÉ");
 }
 
 // === NOUVELLES FONCTIONS : TESTS AVEC SPARSITÉ DYNAMIQUE ===
