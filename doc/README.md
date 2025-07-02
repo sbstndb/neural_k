@@ -9,6 +9,7 @@
 - 🚀 **Performance** : Utilisation de matrices creuses KokkosSparse pour l'efficacité mémoire
 - 🔄 **Parallélisme** : Exécution parallèle avec Kokkos (CPU/GPU)
 - 🧮 **Optimiseurs** : SGD et Adam avec support des matrices creuses
+- 🌲 **Sparsité & Pruning avancés** : Seuils adaptatifs, masques permanents et stratégies de pruning structurel/regrowth
 - 🎯 **Flexibilité** : Architecture modulaire et extensible
 - 📊 **Exemples** : XOR, approximation de fonctions sinusoïdales, séparation linéaire
 

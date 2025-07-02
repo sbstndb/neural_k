@@ -276,3 +276,35 @@ for (int i = 0; i < layer_size; ++i) {
 - Interface unifiée sparse/dense
 - Optimisations KokkosSparse
 - Extensibilité future pour vraie sparsité 
+
+## Sparsité & Pruning (`network.*`)
+
+### Fonctions clés
+
+| Catégorie | Méthodes principales |
+|-----------|---------------------|
+| Détection / Conversion | `is_sparse()`, `auto_convert_to_sparse()` |
+| Sparsité par seuil fixe | `apply_threshold_sparsity()`, `apply_threshold_sparsity_silent()` |
+| Seuils adaptatifs | `compute_adaptive_threshold()`, `apply_adaptive_sparsity()`, `apply_progressive_sparsity()` |
+| Masques & L1 | `apply_l1_regularization()`, `create_sparsity_masks()`, `apply_sparsity_masks()` |
+| Pruning avancé | `apply_structural_pruning()`, `apply_progressive_pruning()`, `apply_sensitivity_pruning()`, `apply_importance_based_pruning()`, `apply_pruning_with_regrowth()` |
+| Statistiques | `sparsity_report()`, `compute_sparsity_stats()` |
+
+### Exemple minimal
+
+```cpp
+// Conversion automatique si nécessaire
+if (!network.is_sparse()) {
+    network.auto_convert_to_sparse();
+}
+
+// Sparsité adaptative ciblant 50 % de zéros
+network.apply_adaptive_sparsity(0.5);
+
+// Pruning structurel, puis fine-tuning
+network.apply_structural_pruning(0.05);
+network.apply_pruning_with_retraining(0.05, 100);
+
+// Rapport
+network.sparsity_report();
+``` 

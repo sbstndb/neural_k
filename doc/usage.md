@@ -201,4 +201,42 @@ for (int sample = 0; sample < num_samples; ++sample) {
     // Copier les données dans les vues réutilisables
     // plutôt que créer de nouvelles vues à chaque fois
 }
+```
+
+## Sparsité et Pruning
+
+### Activer la sparsité automatique
+
+```cpp
+// Convertir en CSR si > 50 % de zéros
+network.auto_convert_to_sparse(0.5, 0.01);
+network.sparsity_report();
+```
+
+### Sparsité par seuil fixe
+
+```cpp
+// Mettre à zéro les poids |w| < 0.02
+network.apply_threshold_sparsity(0.02);
+```
+
+### Seuils adaptatifs
+
+```cpp
+// Calculer un seuil pour atteindre 40 % de sparsité
+real thresh = network.compute_adaptive_threshold(0.4);
+network.apply_adaptive_sparsity(0.4);
+```
+
+### Pruning avancé
+
+```cpp
+// Supprimer les neurones peu importants
+network.apply_structural_pruning(0.05);
+
+// Pruning progressif sur 10 epochs
+network.apply_progressive_pruning(0.01, 0.05, 10);
+
+// Réentraînement après pruning
+network.apply_pruning_with_retraining(0.05, 50);
 ``` 

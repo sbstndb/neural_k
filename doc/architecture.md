@@ -96,7 +96,7 @@ std::unique_ptr<Activation> create_activation(const std::string& type);
 
 ### Matrices creuses
 - **Structure** : CRS (Compressed Row Storage) via KokkosSparse
-- **Initialisation** : Structure dense complète (pour cette version)
+- **Initialisation** : Poids initialisés densément puis convertis en CSR via `auto_convert_to_sparse`
 - **Avantage** : Interface unifiée sparse/dense future
 
 ### Vues Kokkos
@@ -127,7 +127,20 @@ L'architecture permet facilement :
 - ✅ Support matrices creuses
 
 ### Limitations actuelles
-- ⚠️ Structure dense initialisée (pas vraiment sparse)
+- ⚠️ Pas encore de quantization ni compression poids binaire
 - ⚠️ Adam stocke moments denses (overhead mémoire)
 - ⚠️ Pas de support dropout/batch norm
-- ⚠️ Un seul type de perte (MSE) 
+- ⚠️ Un seul type de perte (MSE)
+
+### Sparsité & Pruning
+
+Neural K prend désormais en charge des stratégies de sparsité **dynamiques** et de **pruning** :
+
+* Détection/Conversion automatique : `is_sparse()`, `auto_convert_to_sparse()`
+* Sparsité par seuil fixe : `apply_threshold_sparsity()` (+ version _silent_)
+* Seuils adaptatifs : `compute_adaptive_threshold()`, `apply_adaptive_sparsity()`
+* Masques permanents & régularisation L1 : `create_sparsity_masks()`, `apply_l1_regularization()`
+* Pruning avancé : structurel, progressif, sensibilité, importance, regrowth (`apply_structural_pruning()`, `apply_progressive_pruning()`, `apply_sensitivity_pruning()`, `apply_importance_based_pruning()`, `apply_pruning_with_regrowth()`)
+* Statistiques détaillées : `sparsity_report()`, `compute_sparsity_stats()`
+
+Ces outils fonctionnent directement sur le format CSR et sont compatibles avec toutes les opérations KokkosSparse. 
