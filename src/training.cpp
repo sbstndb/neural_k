@@ -124,1128 +124,401 @@ std::pair<std::vector<int>, std::vector<int>> train_test_split(int num_samples,
     return {std::move(train_indices), std::move(test_indices)};
 }
 
-void xor_train(const std::string& optimizer_choice) {
-    print_separator("ENTRAINEMENT XOR", '=', 80);
-    std::cout << "Probleme: Classification binaire non-lineaire (XOR)" << std::endl;
-    std::cout << "Optimiseur: " << optimizer_choice << std::endl;
+// === STRUCTURES ET FONCTIONS GENERIQUES POUR FACTORISATION ===
 
-    // Structure du réseau
-    std::map<int, int> sizes;
-    sizes[0] = 2; sizes[1] = 80; sizes[2] = 40; sizes[3] = 1;
-    std::vector<std::string> activations = {"relu", "relu", "sigmoid"};
+struct TrainingConfig {
+    std::string problem_name;
+    std::string description;
+    std::map<int, int> network_sizes;
+    std::vector<std::string> activations;
+    real sgd_lr, sgd_epochs, adam_lr, adam_epochs;
+    int batch_size;
+    int num_samples;
+    real convergence_threshold;
+    int progress_frequency;
+};
 
-    // Paramètres
-    real learning_rate; int epochs; int batch_size = 4;
-    std::unique_ptr<Optimizer> optimizer;
-    if (optimizer_choice == "sgd") {
-        learning_rate = 0.8; epochs = 1500;
-        optimizer = std::make_unique<SGD>(learning_rate);
-    } else { // adam default
-        learning_rate = 0.01; epochs = 800;
-        optimizer = std::make_unique<Adam>(learning_rate);
-    }
-
-    Network dnn(sizes, activations, std::move(optimizer));
-    
-    // Affichage de l'architecture
-    print_network_architecture(dnn);
-
-    // Données XOR
+struct TrainingData {
     using HostView2D = Kokkos::View<real**, Kokkos::HostSpace>;
-    const int num_samples = 4;
-    const int input_dim = sizes.at(0);
-    const int output_dim = sizes.at(sizes.size()-1);
-    HostView2D h_xor_inputs("h_xor_inputs", num_samples, input_dim);
-    HostView2D h_xor_outputs("h_xor_outputs", num_samples, output_dim);
-    h_xor_inputs(0, 0) = 0.0; h_xor_inputs(0, 1) = 0.0; h_xor_outputs(0, 0) = 0.0;
-    h_xor_inputs(1, 0) = 1.0; h_xor_inputs(1, 1) = 0.0; h_xor_outputs(1, 0) = 1.0;
-    h_xor_inputs(2, 0) = 0.0; h_xor_inputs(2, 1) = 1.0; h_xor_outputs(2, 0) = 1.0;
-    h_xor_inputs(3, 0) = 1.0; h_xor_inputs(3, 1) = 1.0; h_xor_outputs(3, 0) = 0.0;
-    auto xor_inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), h_xor_inputs);
-    auto xor_outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), h_xor_outputs);
+    HostView2D h_inputs, h_outputs;
+    Kokkos::View<real**, Kokkos::DefaultExecutionSpace> inputs, outputs;
+    std::vector<int> train_indices, test_indices;
+    int input_dim, output_dim;
+};
 
+std::unique_ptr<Optimizer> create_optimizer(const std::string& choice, const TrainingConfig& config) {
+    if (choice == "sgd") {
+        return std::make_unique<SGD>(config.sgd_lr);
+    } else {
+        return std::make_unique<Adam>(config.adam_lr);
+    }
+}
+
+int get_epochs(const std::string& choice, const TrainingConfig& config) {
+    return (choice == "sgd") ? config.sgd_epochs : config.adam_epochs;
+}
+
+real get_learning_rate(const std::string& choice, const TrainingConfig& config) {
+    return (choice == "sgd") ? config.sgd_lr : config.adam_lr;
+}
+
+// Fonction générique d'entraînement
+void generic_train_network(Network& network, TrainingData& data, const TrainingConfig& config, 
+                          const std::string& optimizer_choice, std::mt19937& gen) {
+    int epochs = get_epochs(optimizer_choice, config);
+    real learning_rate = get_learning_rate(optimizer_choice, config);
+    
     print_section_header("ENTRAINEMENT EN COURS", '-', 70);
     std::cout << "+- Parametres:" << std::endl;
     std::cout << "|  - Epoques         : " << epochs << std::endl;
-    std::cout << "|  - Taille batch    : " << batch_size << std::endl;
-    std::cout << "|  - Echantillons    : " << num_samples << std::endl;
+    std::cout << "|  - Taille batch    : " << config.batch_size << std::endl;
+    std::cout << "|  - Echantillons    : " << data.train_indices.size() << std::endl;
     std::cout << "|  - Taux apprentis. : " << learning_rate << std::endl;
     std::cout << "+-" << std::endl;
     std::cout << "\n+- Progression:" << std::endl;
 
     for (int epoch = 0; epoch < epochs; ++epoch) {
-        dnn.zero_accumulated_gradients();
-        for (int i = 0; i < num_samples; ++i) {
-            auto input_subview = Kokkos::subview(xor_inputs, i, Kokkos::ALL());
-            auto target_subview = Kokkos::subview(xor_outputs, i, Kokkos::ALL());
-            View1D prediction = dnn.forward(input_subview);
-            dnn.backward(target_subview);
+        real total_epoch_cost = 0.0;
+        std::shuffle(data.train_indices.begin(), data.train_indices.end(), gen);
+        
+        for (int batch_start = 0; batch_start < static_cast<int>(data.train_indices.size()); batch_start += config.batch_size) {
+            int current_batch_size = std::min(config.batch_size, static_cast<int>(data.train_indices.size()) - batch_start);
+            if (current_batch_size <= 0) continue;
+            
+            network.zero_accumulated_gradients();
+            for (int j = 0; j < current_batch_size; ++j) {
+                int sample_index = data.train_indices[batch_start + j];
+                auto input_subview = Kokkos::subview(data.inputs, sample_index, Kokkos::ALL());
+                auto target_subview = Kokkos::subview(data.outputs, sample_index, Kokkos::ALL());
+                View1D prediction = network.forward(input_subview);
+                total_epoch_cost += network.calculate_cost(prediction, target_subview);
+                network.backward(target_subview);
+            }
+            network.update(current_batch_size);
         }
-        dnn.update(batch_size);
-
-        // Recalculate cost for reporting
-        real current_total_cost = 0.0;
-        for (int i = 0; i < num_samples; ++i) {
-             auto input_subview = Kokkos::subview(xor_inputs, i, Kokkos::ALL());
-             auto target_subview = Kokkos::subview(xor_outputs, i, Kokkos::ALL());
-             View1D prediction = dnn.forward(input_subview);
-             current_total_cost += dnn.calculate_cost(prediction, target_subview);
-        }
-        real avg_cost = current_total_cost / num_samples;
-
-        if ((epoch + 1) % (epochs / 20) == 0 || epoch == 0 || epoch == epochs -1) {
+        
+        real avg_cost = total_epoch_cost / data.train_indices.size();
+        if ((epoch + 1) % (epochs / config.progress_frequency) == 0 || epoch == 0 || epoch == epochs - 1) {
             print_training_progress(epoch + 1, epochs, avg_cost, epoch == epochs - 1);
         }
-        if (avg_cost < 1e-4) {
-             std::cout << "| Convergence atteinte a l'epoque " << epoch + 1 << " !" << std::endl;
-             break;
+        
+        if (avg_cost < config.convergence_threshold) {
+            std::cout << "| Convergence atteinte a l'epoque " << epoch + 1 << " !" << std::endl;
+            break;
         }
     }
     std::cout << "+-" << std::endl;
+}
 
-    print_predictions_header("XOR");
-    View1D prediction_result("prediction_result", output_dim);
+// Fonction générique d'évaluation
+void generic_evaluate_network(Network& network, TrainingData& data, const std::string& task_name) {
+    print_predictions_header(task_name);
+    View1D prediction_result("prediction_result", data.output_dim);
     auto h_prediction_result = Kokkos::create_mirror_view(prediction_result);
     real final_total_cost = 0.0;
+    int correct_predictions = 0;
     
-    std::cout << "+- Table de verite XOR:" << std::endl;
-    std::cout << "|" << std::endl;
-    std::cout << "|  Entree      | Cible | Prediction | Arrondi | Status" << std::endl;
-    std::cout << "| ---------------------------------------------------" << std::endl;
-    
-    for (int i = 0; i < num_samples; ++i) {
-        auto input_subview = Kokkos::subview(xor_inputs, i, Kokkos::ALL());
-        auto target_subview = Kokkos::subview(xor_outputs, i, Kokkos::ALL());
-        View1D prediction = dnn.forward(input_subview);
-        final_total_cost += dnn.calculate_cost(prediction, target_subview);
-        Kokkos::deep_copy(prediction_result, prediction);
-        Kokkos::deep_copy(h_prediction_result, prediction_result); Kokkos::fence();
+    // Calcul des statistiques sur le jeu de test
+    for (int idx : data.test_indices) {
+        auto input_subview = Kokkos::subview(data.inputs, idx, Kokkos::ALL());
+        auto target_subview = Kokkos::subview(data.outputs, idx, Kokkos::ALL());
+        View1D prediction = network.forward(input_subview);
+        final_total_cost += network.calculate_cost(prediction, target_subview);
         
-        real predicted = h_prediction_result(0);
-        int rounded = std::round(predicted);
-        int target = static_cast<int>(h_xor_outputs(i,0));
-        
-        std::cout << "| [" << std::fixed << std::setprecision(1) << h_xor_inputs(i,0) 
-                  << ", " << h_xor_inputs(i,1) << "]     |   " << target << "   |   " 
-                  << std::setprecision(4) << std::setw(7) << predicted << "   |    " << rounded << "    | ";
-        
-        if (rounded == target) {
-            std::cout << "OK";
-        } else {
-            std::cout << "ERR";
-        }
-        std::cout << std::endl;
-    }
-    std::cout << "|" << std::endl;
-    std::cout << "| Cout final moyen: " << std::scientific << std::setprecision(4) << final_total_cost / num_samples << std::endl;
-    std::cout << "+-" << std::endl;
-}
-
-void sine_train(const std::string& optimizer_choice) {
-    print_separator("APPROXIMATION FONCTION SINUS", '=', 80);
-    std::cout << "Probleme: Regression - Approximation de sin(x)" << std::endl;
-    std::cout << "Optimiseur: " << optimizer_choice << std::endl;
-
-    std::map<int, int> sizes;
-    sizes[0] = 1; sizes[1] = 32; sizes[2] = 32; sizes[3] = 1;
-    std::vector<std::string> activations = {"relu", "relu", "linear"};
-
-    real learning_rate; int epochs; int batch_size = 16; int num_samples = 2048;
-    std::unique_ptr<Optimizer> optimizer;
-    if (optimizer_choice == "sgd") {
-        learning_rate = 0.02; epochs = 500;
-        optimizer = std::make_unique<SGD>(learning_rate);
-    } else { // adam default
-        learning_rate = 0.001; epochs = 800;
-        optimizer = std::make_unique<Adam>(learning_rate);
-    }
-
-    Network dnn(sizes, activations, std::move(optimizer));
-    
-    // Affichage de l'architecture
-    print_network_architecture(dnn);
-
-    using HostView1D = Kokkos::View<real*, Kokkos::HostSpace>;
-    using HostView2D = Kokkos::View<real**, Kokkos::HostSpace>;
-    const int input_dim = sizes.at(0); const int output_dim = sizes.at(sizes.size()-1);
-    HostView2D h_inputs("h_sine_inputs", num_samples, input_dim);
-    HostView2D h_outputs("h_sine_outputs", num_samples, output_dim);
-    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
-    std::uniform_real_distribution<real> distrib(-M_PI, M_PI);
-    for(int i=0; i < num_samples; ++i) {
-        real x = distrib(gen); h_inputs(i, 0) = x; h_outputs(i, 0) = std::sin(x);
-    }
-    auto train_inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), h_inputs);
-    auto train_outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), h_outputs);
-
-    print_section_header("ENTRAINEMENT EN COURS", '-', 60);
-    std::cout << "+- Parametres:" << std::endl;
-    std::cout << "|  - Epoques        : " << epochs << std::endl;
-    std::cout << "|  - Taille batch   : " << batch_size << std::endl;
-    std::cout << "|  - Echantillons   : " << num_samples << std::endl;
-    std::cout << "|  - Taux apprentis.: " << learning_rate << std::endl;
-    std::cout << "|  - Domaine       : [-PI, PI]" << std::endl;
-    std::cout << "+-" << std::endl;
-    std::cout << "\n+- Progression:" << std::endl;
-
-    // Séparation des données : 80 % apprentissage / 20 % test
-    auto [indices, test_indices] = train_test_split(num_samples, 0.8, gen);
-
-    for (int epoch = 0; epoch < epochs; ++epoch) {
-        real total_epoch_cost = 0.0;
-        std::shuffle(indices.begin(), indices.end(), gen);
-        for (int batch_start = 0; batch_start < static_cast<int>(indices.size()); batch_start += batch_size) {
-            int current_batch_size = std::min(batch_size, static_cast<int>(indices.size()) - batch_start);
-            if (current_batch_size <= 0) continue;
-            dnn.zero_accumulated_gradients();
-            for (int j = 0; j < current_batch_size; ++j) {
-                int sample_index = indices[batch_start + j];
-                auto input_subview = Kokkos::subview(train_inputs, sample_index, Kokkos::ALL());
-                auto target_subview = Kokkos::subview(train_outputs, sample_index, Kokkos::ALL());
-                View1D prediction = dnn.forward(input_subview);
-                total_epoch_cost += dnn.calculate_cost(prediction, target_subview);
-                dnn.backward(target_subview);
-            }
-            dnn.update(current_batch_size);
-        }
-        real avg_cost = total_epoch_cost / indices.size();
-        if ((epoch + 1) % (epochs / 20) == 0 || epoch == 0 || epoch == epochs - 1) {
-             print_training_progress(epoch + 1, epochs, avg_cost, epoch == epochs - 1);
+        // Pour classification binaire/multi-classe
+        if (data.output_dim == 1) {
+            Kokkos::deep_copy(prediction_result, prediction);
+            Kokkos::deep_copy(h_prediction_result, prediction_result); 
+            Kokkos::fence();
+            int predicted_class = std::round(h_prediction_result(0));
+            int target_class = static_cast<int>(data.h_outputs(idx, 0));
+            if (predicted_class == target_class) correct_predictions++;
         }
     }
-    std::cout << "+-" << std::endl;
-
-    print_predictions_header("SINUS");
-    View1D prediction_result("prediction_result_sine", output_dim);
-    auto h_prediction_result = Kokkos::create_mirror_view(prediction_result);
-    real final_total_cost = 0.0; int num_test_samples = std::min(static_cast<int>(test_indices.size()), 10);
     
-    std::cout << "+- Echantillons de prediction:" << std::endl;
-    std::cout << "|" << std::endl;
-    std::cout << "|    x     | sin(x) cible | Prediction | Erreur abs | Qualite" << std::endl;
-    std::cout << "| --------------------------------------------------------" << std::endl;
+    real avg_cost = final_total_cost / data.test_indices.size();
     
-    for (int k = 0; k < num_test_samples; ++k) {
-        int i = test_indices[k];
-        auto input_subview = Kokkos::subview(train_inputs, i, Kokkos::ALL());
-        auto target_subview = Kokkos::subview(train_outputs, i, Kokkos::ALL());
-        View1D prediction = dnn.forward(input_subview);
-        final_total_cost += dnn.calculate_cost(prediction, target_subview);
-        Kokkos::deep_copy(prediction_result, prediction);
-        Kokkos::deep_copy(h_prediction_result, prediction_result); Kokkos::fence();
-        real input_x = h_inputs(i, 0); 
-        real target_y = h_outputs(i, 0);
-        real predicted_y = h_prediction_result(0);
-        real abs_error = std::abs(target_y - predicted_y);
-        
-        std::cout << "| " << std::fixed << std::setprecision(4) << std::setw(7) << input_x << " | " 
-                  << std::setw(11) << target_y << " | " << std::setw(10) << predicted_y << " | " 
-                  << std::setw(10) << abs_error << " | ";
-        
-        if (abs_error < 0.001) {
-            std::cout << "Excellent";
-        } else if (abs_error < 0.01) {
-            std::cout << "Bon";
-        } else {
-            std::cout << "Moyen";
-        }
-        std::cout << std::endl;
-    }
-    
-    std::cout << "|" << std::endl;
     std::cout << "+- RESULTATS FINAUX:" << std::endl;
-    std::cout << "|  - Cout final moyen (test): " << std::scientific << std::setprecision(4) << final_total_cost / test_indices.size() << std::endl;
-    std::cout << "+-" << std::endl;
-}
-
-void linear_sep_train(const std::string& optimizer_choice) {
-    print_separator("SEPARATION LINEAIRE", '=', 80);
-    std::cout << "Probleme: Classification binaire - Separation lineaire" << std::endl;
-    std::cout << "Optimiseur: " << optimizer_choice << std::endl;
-
-    std::map<int, int> sizes; sizes[0] = 2; sizes[1] = 1;
-    std::vector<std::string> activations = {"sigmoid"};
-
-    real learning_rate; int epochs; int batch_size = 16; int num_samples = 2560;
-    std::unique_ptr<Optimizer> optimizer;
-    if (optimizer_choice == "sgd") {
-        learning_rate = 0.1; epochs = 100;
-        optimizer = std::make_unique<SGD>(learning_rate);
-    } else { // adam default
-        learning_rate = 0.01; epochs = 150;
-        optimizer = std::make_unique<Adam>(learning_rate);
-    }
-
-    Network dnn(sizes, activations, std::move(optimizer));
+    std::cout << "|  - Cout final moyen (test): " << std::scientific << std::setprecision(4) << avg_cost << std::endl;
     
-    // Affichage de l'architecture
-    print_network_architecture(dnn);
-
-    using HostView2D = Kokkos::View<real**, Kokkos::HostSpace>;
-    const int input_dim = sizes.at(0); const int output_dim = sizes.at(sizes.size()-1);
-    HostView2D h_inputs("h_linear_inputs", num_samples, input_dim);
-    HostView2D h_outputs("h_linear_outputs", num_samples, output_dim);
-    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count() + 123);
-    std::uniform_real_distribution<real> distrib(-1.0, 1.0);
-    real margin = 0.1; int count_class0 = 0; int count_class1 = 0;
-    for(int i=0; i < num_samples; ++i) {
-        real x = distrib(gen); real y = distrib(gen);
-        h_inputs(i, 0) = x; h_inputs(i, 1) = y;
-        if (y < x - margin) { h_outputs(i, 0) = 0.0; count_class0++; }
-        else if (y > x + margin) { h_outputs(i, 0) = 1.0; count_class1++; }
-        else { i--; continue; }
-    }
-    auto train_inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), h_inputs);
-    auto train_outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), h_outputs);
-
-    print_section_header("GENERATION DES DONNEES", '-', 60);
-    std::cout << "+- Classes generees:" << std::endl;
-    std::cout << "|  - Classe 0 (y < x - " << margin << ") : " << count_class0 << " echantillons" << std::endl;
-    std::cout << "|  - Classe 1 (y > x + " << margin << ") : " << count_class1 << " echantillons" << std::endl;
-    std::cout << "|  - Total                      : " << num_samples << " echantillons" << std::endl;
-    std::cout << "+-" << std::endl;
-
-    print_section_header("ENTRAINEMENT EN COURS", '-', 60);
-    std::cout << "+- Parametres:" << std::endl;
-    std::cout << "|  - Epoques        : " << epochs << std::endl;
-    std::cout << "|  - Taille batch   : " << batch_size << std::endl;
-    std::cout << "|  - Echantillons   : " << num_samples << std::endl;
-    std::cout << "|  - Taux apprentis.: " << learning_rate << std::endl;
-    std::cout << "|  - Marge separat.: " << margin << std::endl;
-    std::cout << "+-" << std::endl;
-    std::cout << "\n+- Progression:" << std::endl;
-
-    // Séparation des données : 80 % apprentissage / 20 % test
-    auto [indices, test_indices] = train_test_split(num_samples, 0.8, gen);
-
-    for (int epoch = 0; epoch < epochs; ++epoch) {
-        real total_epoch_cost = 0.0;
-        std::shuffle(indices.begin(), indices.end(), gen);
-        for (int batch_start = 0; batch_start < static_cast<int>(indices.size()); batch_start += batch_size) {
-            int current_batch_size = std::min(batch_size, static_cast<int>(indices.size()) - batch_start);
-             if (current_batch_size <= 0) continue;
-            dnn.zero_accumulated_gradients();
-            for (int j = 0; j < current_batch_size; ++j) {
-                int sample_index = indices[batch_start + j];
-                auto input_subview = Kokkos::subview(train_inputs, sample_index, Kokkos::ALL());
-                auto target_subview = Kokkos::subview(train_outputs, sample_index, Kokkos::ALL());
-                View1D prediction = dnn.forward(input_subview);
-                total_epoch_cost += dnn.calculate_cost(prediction, target_subview);
-                dnn.backward(target_subview);
-            }
-            dnn.update(current_batch_size);
-        }
-        real avg_cost = total_epoch_cost / indices.size();
-        if ((epoch + 1) % (epochs / 10) == 0 || epoch == 0 || epoch == epochs - 1) {
-             print_training_progress(epoch + 1, epochs, avg_cost, epoch == epochs - 1);
-        }
-         if (avg_cost < 1e-3) {
-             std::cout << "| Convergence atteinte a l'epoque " << epoch + 1 << " !" << std::endl;
-             break;
-         }
-    }
-    std::cout << "+-" << std::endl;
-
-    print_predictions_header("SEPARATION LINEAIRE");
-    View1D prediction_result("prediction_result_linear", output_dim);
-    auto h_prediction_result = Kokkos::create_mirror_view(prediction_result);
-    real final_total_cost = 0.0; int correct_predictions = 0;
-    
-    // Calcul des statistiques complètes (jeu de test)
-    for (int idx : test_indices) {
-        int i = idx;
-        auto input_subview = Kokkos::subview(train_inputs, i, Kokkos::ALL());
-        auto target_subview = Kokkos::subview(train_outputs, i, Kokkos::ALL());
-        View1D prediction = dnn.forward(input_subview);
-        final_total_cost += dnn.calculate_cost(prediction, target_subview);
-        Kokkos::deep_copy(prediction_result, prediction);
-        Kokkos::deep_copy(h_prediction_result, prediction_result); Kokkos::fence();
-        real predicted_value = h_prediction_result(0); 
-        int predicted_class = std::round(predicted_value);
-        int target_class = static_cast<int>(h_outputs(i, 0));
-        if (predicted_class == target_class) correct_predictions++;
-    }
-    real accuracy = static_cast<real>(correct_predictions) / test_indices.size();
-    
-    std::cout << "+- Echantillons de prediction (premiers 10):" << std::endl;
-    std::cout << "|" << std::endl;
-    std::cout << "|  Coordonnees  | Cible | Prediction | Classe | Status" << std::endl;
-    std::cout << "| ------------------------------------------------" << std::endl;
-    
-    // Affichage des 10 premiers échantillons
-    for (int k = 0; k < std::min(10, static_cast<int>(test_indices.size())); ++k) {
-        int i = test_indices[k];
-        auto input_subview = Kokkos::subview(train_inputs, i, Kokkos::ALL());
-        auto target_subview = Kokkos::subview(train_outputs, i, Kokkos::ALL());
-        View1D prediction = dnn.forward(input_subview);
-        Kokkos::deep_copy(prediction_result, prediction);
-        Kokkos::deep_copy(h_prediction_result, prediction_result); Kokkos::fence();
-        real predicted_value = h_prediction_result(0); 
-        int predicted_class = std::round(predicted_value);
-        int target_class = static_cast<int>(h_outputs(i, 0));
-        
-        std::cout << "| [" << std::fixed << std::setprecision(2) << std::setw(5) << h_inputs(i,0) 
-                  << "," << std::setw(5) << h_inputs(i,1) << "] |   " << target_class << "   |   " 
-                  << std::setprecision(3) << std::setw(7) << predicted_value << "   |    " 
-                  << predicted_class << "    | ";
-        
-        if (predicted_class == target_class) {
-            std::cout << "OK";
-        } else {
-            std::cout << "ERR";
-        }
-        std::cout << std::endl;
-    }
-    
-    std::cout << "|" << std::endl;
-    std::cout << "+- RESULTATS FINAUX:" << std::endl;
-    std::cout << "|  - Cout final moyen (test): " << std::scientific << std::setprecision(4) << final_total_cost / test_indices.size() << std::endl;
-    std::cout << "|  - Precision (test) : " << std::fixed << std::setprecision(2) << accuracy * 100.0 << "%" << std::endl;
-    std::cout << "|  - Echantillons OK  : " << correct_predictions << "/" << test_indices.size() << std::endl;
-    
-    if (accuracy >= 0.95) {
-        std::cout << "|  - Qualite         : Excellent (>=95%)" << std::endl;
-    } else if (accuracy >= 0.85) {
-        std::cout << "|  - Qualite         : Bon (>=85%)" << std::endl;
+    if (data.output_dim == 1) {
+        real accuracy = static_cast<real>(correct_predictions) / data.test_indices.size();
+        std::cout << "|  - Precision (test) : " << std::fixed << std::setprecision(2) << accuracy * 100.0 << "%" << std::endl;
+        std::cout << "|  - Echantillons OK  : " << correct_predictions << "/" << data.test_indices.size() << std::endl;
     } else {
-        std::cout << "|  - Qualite         : A ameliorer (<85%)" << std::endl;
+        std::cout << "|  - Echantillons testes: " << data.test_indices.size() << std::endl;
     }
     std::cout << "+-" << std::endl;
 }
 
-void spiral_train(const std::string& optimizer_choice) {
-    print_separator("CLASSIFICATION SPIRALES", '=', 80);
-    std::cout << "Probleme: Classification multi-classes - Motifs en spirale (3 classes)" << std::endl;
+// Configuration des cas de test simplifiés
+TrainingConfig get_xor_config() {
+    return {
+        "XOR", "Classification binaire non-lineaire (XOR)",
+        {{0, 2}, {1, 20}, {2, 10}, {3, 1}}, {"relu", "relu", "sigmoid"},
+        0.3, 800, 0.01, 400, 4, 4, 1e-4, 20
+    };
+}
+
+TrainingConfig get_sine_config() {
+    return {
+        "SINUS", "Regression - Approximation de sin(x)",
+        {{0, 1}, {1, 16}, {2, 16}, {3, 1}}, {"relu", "relu", "linear"},
+        0.02, 300, 0.001, 400, 16, 1024, 1e-5, 20
+    };
+}
+
+TrainingConfig get_linear_config() {
+    return {
+        "SEPARATION LINEAIRE", "Classification binaire - Separation lineaire",
+        {{0, 2}, {1, 1}}, {"sigmoid"},
+        0.1, 60, 0.01, 80, 16, 800, 1e-3, 10
+    };
+}
+
+// Générateurs de données simplifiés
+TrainingData generate_xor_data(std::mt19937& gen) {
+    TrainingData data;
+    data.input_dim = 2; data.output_dim = 1;
+    data.h_inputs = TrainingData::HostView2D("xor_inputs", 4, 2);
+    data.h_outputs = TrainingData::HostView2D("xor_outputs", 4, 1);
+    
+    data.h_inputs(0,0)=0; data.h_inputs(0,1)=0; data.h_outputs(0,0)=0;
+    data.h_inputs(1,0)=1; data.h_inputs(1,1)=0; data.h_outputs(1,0)=1;
+    data.h_inputs(2,0)=0; data.h_inputs(2,1)=1; data.h_outputs(2,0)=1;
+    data.h_inputs(3,0)=1; data.h_inputs(3,1)=1; data.h_outputs(3,0)=0;
+    
+    data.inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_inputs);
+    data.outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_outputs);
+    
+    // Pour XOR, on utilise tous les échantillons pour train et test
+    data.train_indices = {0, 1, 2, 3};
+    data.test_indices = {0, 1, 2, 3};
+    return data;
+}
+
+TrainingData generate_sine_data(int num_samples, std::mt19937& gen) {
+    TrainingData data;
+    data.input_dim = 1; data.output_dim = 1;
+    data.h_inputs = TrainingData::HostView2D("sine_inputs", num_samples, 1);
+    data.h_outputs = TrainingData::HostView2D("sine_outputs", num_samples, 1);
+    
+    std::uniform_real_distribution<real> distrib(-M_PI, M_PI);
+    for(int i = 0; i < num_samples; ++i) {
+        real x = distrib(gen);
+        data.h_inputs(i, 0) = x;
+        data.h_outputs(i, 0) = std::sin(x);
+    }
+    
+    data.inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_inputs);
+    data.outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_outputs);
+    
+    auto [train_idx, test_idx] = train_test_split(num_samples, 0.8, gen);
+    data.train_indices = std::move(train_idx);
+    data.test_indices = std::move(test_idx);
+    return data;
+}
+
+TrainingData generate_linear_data(int num_samples, std::mt19937& gen) {
+    TrainingData data;
+    data.input_dim = 2; data.output_dim = 1;
+    data.h_inputs = TrainingData::HostView2D("linear_inputs", num_samples, 2);
+    data.h_outputs = TrainingData::HostView2D("linear_outputs", num_samples, 1);
+    
+    std::uniform_real_distribution<real> distrib(-1.0, 1.0);
+    real margin = 0.1;
+    for(int i = 0; i < num_samples; ++i) {
+        real x, y;
+        do {
+            x = distrib(gen); y = distrib(gen);
+        } while (std::abs(y - x) < margin); // éviter la zone ambiguë
+        
+        data.h_inputs(i, 0) = x; data.h_inputs(i, 1) = y;
+        data.h_outputs(i, 0) = (y > x) ? 1.0 : 0.0;
+    }
+    
+    data.inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_inputs);
+    data.outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_outputs);
+    
+    auto [train_idx, test_idx] = train_test_split(num_samples, 0.8, gen);
+    data.train_indices = std::move(train_idx);
+    data.test_indices = std::move(test_idx);
+    return data;
+}
+
+// Fonction générique de test simplifiée
+void run_simple_test(const TrainingConfig& config, 
+                     std::function<TrainingData(std::mt19937&)> data_generator,
+                     const std::string& optimizer_choice) {
+    print_separator("ENTRAINEMENT " + config.problem_name, '=', 80);
+    std::cout << "Probleme: " << config.description << std::endl;
     std::cout << "Optimiseur: " << optimizer_choice << std::endl;
 
-    // Structure du réseau pour classification 3 classes
-    std::map<int, int> sizes;
-    sizes[0] = 2; sizes[1] = 100; sizes[2] = 50; sizes[3] = 3;  // 3 classes de sortie
-    std::vector<std::string> activations = {"relu", "relu", "sigmoid"};
+    auto optimizer = create_optimizer(optimizer_choice, config);
+    Network network(config.network_sizes, config.activations, std::move(optimizer));
+    print_network_architecture(network);
 
-    // Paramètres d'entraînement
-    real learning_rate; 
-    int epochs; 
-    int batch_size = 32; 
-    int num_samples = 1200; // 400 échantillons par classe
-    std::unique_ptr<Optimizer> optimizer;
+    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    auto data = data_generator(gen);
     
-    if (optimizer_choice == "sgd") {
-        learning_rate = 0.3; 
-        epochs = 800;
-        optimizer = std::make_unique<SGD>(learning_rate);
-    } else { // adam default
-        learning_rate = 0.005; 
-        epochs = 500;
-        optimizer = std::make_unique<Adam>(learning_rate);
-    }
+    generic_train_network(network, data, config, optimizer_choice, gen);
+    generic_evaluate_network(network, data, config.problem_name);
+}
 
-    Network dnn(sizes, activations, std::move(optimizer));
-    
-    // Affichage de l'architecture
-    print_network_architecture(dnn);
+void xor_train(const std::string& optimizer_choice) {
+    run_simple_test(get_xor_config(), generate_xor_data, optimizer_choice);
+}
 
-    // Génération des données en spirale
-    using HostView2D = Kokkos::View<real**, Kokkos::HostSpace>;
-    const int input_dim = sizes.at(0); 
-    const int output_dim = sizes.at(sizes.size()-1);
-    HostView2D h_inputs("h_spiral_inputs", num_samples, input_dim);
-    HostView2D h_outputs("h_spiral_outputs", num_samples, output_dim);
+ void sine_train(const std::string& optimizer_choice) {
+     auto config = get_sine_config();
+     run_simple_test(config, [&config](std::mt19937& gen) { return generate_sine_data(config.num_samples, gen); }, optimizer_choice);
+ }
+
+ void linear_sep_train(const std::string& optimizer_choice) {
+     auto config = get_linear_config();
+     run_simple_test(config, [&config](std::mt19937& gen) { return generate_linear_data(config.num_samples, gen); }, optimizer_choice);
+ }
+
+TrainingConfig get_spiral_config() {
+    return {
+        "SPIRALES", "Classification multi-classes - Motifs en spirale (3 classes)",
+        {{0, 2}, {1, 50}, {2, 25}, {3, 3}}, {"relu", "relu", "sigmoid"},
+        0.3, 400, 0.005, 300, 32, 900, 1e-4, 20
+    };
+}
+
+TrainingData generate_spiral_data(int num_samples, std::mt19937& gen) {
+    TrainingData data;
+    data.input_dim = 2; data.output_dim = 3;
+    data.h_inputs = TrainingData::HostView2D("spiral_inputs", num_samples, 2);
+    data.h_outputs = TrainingData::HostView2D("spiral_outputs", num_samples, 3);
     
-    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count() + 456);
     std::uniform_real_distribution<real> noise_distrib(-0.1, 0.1);
-    
-    print_section_header("GENERATION DES DONNEES SPIRALES", '-', 70);
-    std::cout << "+- Parametres de generation:" << std::endl;
-    std::cout << "|  - Nombre de classes      : 3" << std::endl;
-    std::cout << "|  - Echantillons par classe: " << num_samples/3 << std::endl;
-    std::cout << "|  - Bruit ajoute           : [-0.1, 0.1]" << std::endl;
-    std::cout << "+-" << std::endl;
-    
     int samples_per_class = num_samples / 3;
     for (int class_id = 0; class_id < 3; ++class_id) {
         for (int i = 0; i < samples_per_class; ++i) {
             int sample_idx = class_id * samples_per_class + i;
+            real t = static_cast<real>(i) / samples_per_class * 2.0 * M_PI;
+            real radius = 0.3 + t * 0.15;
+            real angle_offset = class_id * 2.0 * M_PI / 3.0;
+            real x = radius * std::cos(t + angle_offset) + noise_distrib(gen);
+            real y = radius * std::sin(t + angle_offset) + noise_distrib(gen);
             
-            // Paramètres de la spirale pour chaque classe
-            real t = static_cast<real>(i) / samples_per_class * 2.0 * M_PI; // Angle de 0 à 2π
-            real radius = 0.3 + t * 0.15; // Rayon croissant avec l'angle
-            real angle_offset = class_id * 2.0 * M_PI / 3.0; // Décalage de 120° entre classes
-            
-            // Coordonnées de base de la spirale
-            real x = radius * std::cos(t + angle_offset);
-            real y = radius * std::sin(t + angle_offset);
-            
-            // Ajout de bruit
-            x += noise_distrib(gen);
-            y += noise_distrib(gen);
-            
-            h_inputs(sample_idx, 0) = x;
-            h_inputs(sample_idx, 1) = y;
-            
-            // Encodage one-hot pour les classes
+            data.h_inputs(sample_idx, 0) = x;
+            data.h_inputs(sample_idx, 1) = y;
             for (int j = 0; j < 3; ++j) {
-                h_outputs(sample_idx, j) = (j == class_id) ? 1.0 : 0.0;
+                data.h_outputs(sample_idx, j) = (j == class_id) ? 1.0 : 0.0;
             }
         }
     }
     
-    auto train_inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), h_inputs);
-    auto train_outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), h_outputs);
-
-    print_section_header("ENTRAINEMENT EN COURS", '-', 70);
-    std::cout << "+- Parametres:" << std::endl;
-    std::cout << "|  - Epoques         : " << epochs << std::endl;
-    std::cout << "|  - Taille batch    : " << batch_size << std::endl;
-    std::cout << "|  - Echantillons    : " << num_samples << std::endl;
-    std::cout << "|  - Taux apprentis. : " << learning_rate << std::endl;
-    std::cout << "+-" << std::endl;
-    std::cout << "\n+- Progression:" << std::endl;
-
-    // Séparation des données : 80 % apprentissage / 20 % test
-    auto [indices, test_indices] = train_test_split(num_samples, 0.8, gen);
-
-    for (int epoch = 0; epoch < epochs; ++epoch) {
-        real total_epoch_cost = 0.0;
-        std::shuffle(indices.begin(), indices.end(), gen);
-        
-        for (int batch_start = 0; batch_start < static_cast<int>(indices.size()); batch_start += batch_size) {
-            int current_batch_size = std::min(batch_size, static_cast<int>(indices.size()) - batch_start);
-            if (current_batch_size <= 0) continue;
-            
-            dnn.zero_accumulated_gradients();
-            for (int j = 0; j < current_batch_size; ++j) {
-                int sample_index = indices[batch_start + j];
-                auto input_subview = Kokkos::subview(train_inputs, sample_index, Kokkos::ALL());
-                auto target_subview = Kokkos::subview(train_outputs, sample_index, Kokkos::ALL());
-                View1D prediction = dnn.forward(input_subview);
-                total_epoch_cost += dnn.calculate_cost(prediction, target_subview);
-                dnn.backward(target_subview);
-            }
-            dnn.update(current_batch_size);
-        }
-        
-        real avg_cost = total_epoch_cost / indices.size();
-        if ((epoch + 1) % (epochs / 20) == 0 || epoch == 0 || epoch == epochs - 1) {
-            print_training_progress(epoch + 1, epochs, avg_cost, epoch == epochs - 1);
-        }
-        
-        if (avg_cost < 1e-4) {
-            std::cout << "| Convergence atteinte a l'epoque " << epoch + 1 << " !" << std::endl;
-            break;
-        }
-    }
-    std::cout << "+-" << std::endl;
-
-    print_predictions_header("SPIRALES - CLASSIFICATION 3 CLASSES");
-    View1D prediction_result("prediction_result_spiral", output_dim);
-    auto h_prediction_result = Kokkos::create_mirror_view(prediction_result);
-    real final_total_cost = 0.0; 
-    int correct_predictions = 0;
-    std::vector<int> class_correct(3, 0);
-    std::vector<int> class_total(3, 0);
+    data.inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_inputs);
+    data.outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_outputs);
     
-    // Calcul des statistiques complètes (jeu de test)
-    for (int idx : test_indices) {
-        int i = idx;
-        auto input_subview = Kokkos::subview(train_inputs, i, Kokkos::ALL());
-        auto target_subview = Kokkos::subview(train_outputs, i, Kokkos::ALL());
-        View1D prediction = dnn.forward(input_subview);
-        final_total_cost += dnn.calculate_cost(prediction, target_subview);
-        
-        Kokkos::deep_copy(prediction_result, prediction);
-        Kokkos::deep_copy(h_prediction_result, prediction_result); 
-        Kokkos::fence();
-        
-        // Trouver la classe prédite (argmax)
-        int predicted_class = 0;
-        real max_pred = h_prediction_result(0);
-        for (int c = 1; c < 3; ++c) {
-            if (h_prediction_result(c) > max_pred) {
-                max_pred = h_prediction_result(c);
-                predicted_class = c;
-            }
-        }
-        
-        // Trouver la vraie classe
-        int true_class = 0;
-        for (int c = 0; c < 3; ++c) {
-            if (h_outputs(i, c) > 0.5) {
-                true_class = c;
-                break;
-            }
-        }
-        
-        class_total[true_class]++;
-        if (predicted_class == true_class) {
-            correct_predictions++;
-            class_correct[true_class]++;
-        }
-    }
-    
-    real accuracy = static_cast<real>(correct_predictions) / test_indices.size();
-    
-    std::cout << "+- Echantillons de prediction (premiers 12):" << std::endl;
-    std::cout << "|" << std::endl;
-    std::cout << "|  Coordonnees  | Vraie | Predictions [C0, C1, C2] | Pred. | Status" << std::endl;
-    std::cout << "| -------------------------------------------------------------------" << std::endl;
-    
-    // Affichage des 12 premiers échantillons (4 par classe)
-    for (int class_id = 0; class_id < 3; ++class_id) {
-        for (int k = 0; k < 4; ++k) {
-            int i = class_id * samples_per_class + k;
-            auto input_subview = Kokkos::subview(train_inputs, i, Kokkos::ALL());
-            auto target_subview = Kokkos::subview(train_outputs, i, Kokkos::ALL());
-            View1D prediction = dnn.forward(input_subview);
-            
-            Kokkos::deep_copy(prediction_result, prediction);
-            Kokkos::deep_copy(h_prediction_result, prediction_result); 
-            Kokkos::fence();
-            
-            int predicted_class = 0;
-            real max_pred = h_prediction_result(0);
-            for (int c = 1; c < 3; ++c) {
-                if (h_prediction_result(c) > max_pred) {
-                    max_pred = h_prediction_result(c);
-                    predicted_class = c;
-                }
-            }
-            
-            std::cout << "| [" << std::fixed << std::setprecision(2) << std::setw(5) << h_inputs(i,0) 
-                      << "," << std::setw(5) << h_inputs(i,1) << "] |   " << class_id << "   | [" 
-                      << std::setprecision(3) << std::setw(4) << h_prediction_result(0) << "," 
-                      << std::setw(4) << h_prediction_result(1) << ","
-                      << std::setw(4) << h_prediction_result(2) << "] |   " 
-                      << predicted_class << "   | ";
-            
-            if (predicted_class == class_id) {
-                std::cout << "OK";
-            } else {
-                std::cout << "ERR";
-            }
-            std::cout << std::endl;
-        }
-    }
-    
-    std::cout << "|" << std::endl;
-    std::cout << "+- RESULTATS FINAUX:" << std::endl;
-    std::cout << "|  - Cout final moyen (test): " << std::scientific << std::setprecision(4) << final_total_cost / test_indices.size() << std::endl;
-    std::cout << "|  - Precision globale (test): " << std::fixed << std::setprecision(2) << accuracy * 100.0 << "%" << std::endl;
-    std::cout << "|  - Echantillons OK  : " << correct_predictions << "/" << test_indices.size() << std::endl;
-    std::cout << "|" << std::endl;
-    std::cout << "|  - Precision par classe:" << std::endl;
-    
-    for (int c = 0; c < 3; ++c) {
-        real class_accuracy = (class_total[c] > 0) ? static_cast<real>(class_correct[c]) / class_total[c] : 0.0;
-        std::cout << "|    * Spirale " << c << "       : " << std::setprecision(1) << class_accuracy * 100.0 
-                  << "% (" << class_correct[c] << "/" << class_total[c] << ")" << std::endl;
-    }
-    
-    if (accuracy >= 0.90) {
-        std::cout << "|  - Qualite         : Excellent (>=90%)" << std::endl;
-    } else if (accuracy >= 0.75) {
-        std::cout << "|  - Qualite         : Bon (>=75%)" << std::endl;
-    } else {
-        std::cout << "|  - Qualite         : A ameliorer (<75%)" << std::endl;
-    }
-    std::cout << "+-" << std::endl;
+    auto [train_idx, test_idx] = train_test_split(num_samples, 0.8, gen);
+    data.train_indices = std::move(train_idx);
+    data.test_indices = std::move(test_idx);
+    return data;
 }
 
-void gaussian_clusters_train(const std::string& optimizer_choice) {
-    print_separator("CLASSIFICATION CLUSTERS GAUSSIENS", '=', 80);
-    std::cout << "Probleme: Classification multi-classes - Clusters gaussiens (4 classes)" << std::endl;
-    std::cout << "Optimiseur: " << optimizer_choice << std::endl;
-
-    // Structure du réseau pour classification 4 classes
-    std::map<int, int> sizes;
-    sizes[0] = 2; sizes[1] = 80; sizes[2] = 60; sizes[3] = 4;  // 4 classes de sortie
-    std::vector<std::string> activations = {"relu", "relu", "sigmoid"};
-
-    // Paramètres d'entraînement
-    real learning_rate; 
-    int epochs; 
-    int batch_size = 40; 
-    int num_samples = 1600; // 400 échantillons par classe
-    std::unique_ptr<Optimizer> optimizer;
-    
-    if (optimizer_choice == "sgd") {
-        learning_rate = 0.4; 
-        epochs = 600;
-        optimizer = std::make_unique<SGD>(learning_rate);
-    } else { // adam default
-        learning_rate = 0.008; 
-        epochs = 400;
-        optimizer = std::make_unique<Adam>(learning_rate);
-    }
-
-    Network dnn(sizes, activations, std::move(optimizer));
-    
-    // Affichage de l'architecture
-    print_network_architecture(dnn);
-
-    // Génération des données de clusters gaussiens
-    using HostView2D = Kokkos::View<real**, Kokkos::HostSpace>;
-    const int input_dim = sizes.at(0); 
-    const int output_dim = sizes.at(sizes.size()-1);
-    HostView2D h_inputs("h_gaussian_inputs", num_samples, input_dim);
-    HostView2D h_outputs("h_gaussian_outputs", num_samples, output_dim);
-    
-    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count() + 789);
-    
-    // Définition des centres et variances des 4 clusters
-    std::vector<std::array<real, 2>> cluster_centers = {
-        {-1.5, -1.5},  // Cluster 0: bas-gauche
-        { 1.5, -1.5},  // Cluster 1: bas-droite  
-        {-1.5,  1.5},  // Cluster 2: haut-gauche
-        { 1.5,  1.5}   // Cluster 3: haut-droite
+TrainingConfig get_gaussian_config() {
+    return {
+        "CLUSTERS GAUSSIENS", "Classification multi-classes - Clusters gaussiens (4 classes)",
+        {{0, 2}, {1, 40}, {2, 30}, {3, 4}}, {"relu", "relu", "sigmoid"},
+        0.4, 300, 0.008, 200, 40, 800, 1e-4, 20
     };
+}
+
+TrainingData generate_gaussian_data(int num_samples, std::mt19937& gen) {
+    TrainingData data;
+    data.input_dim = 2; data.output_dim = 4;
+    data.h_inputs = TrainingData::HostView2D("gaussian_inputs", num_samples, 2);
+    data.h_outputs = TrainingData::HostView2D("gaussian_outputs", num_samples, 4);
     
-    std::vector<real> cluster_std = {0.4, 0.35, 0.45, 0.38}; // Écarts-types différents
-    
-    print_section_header("GENERATION DES CLUSTERS GAUSSIENS", '-', 70);
-    std::cout << "+- Parametres de generation:" << std::endl;
-    std::cout << "|  - Nombre de classes      : 4" << std::endl;
-    std::cout << "|  - Echantillons par classe: " << num_samples/4 << std::endl;
-    std::cout << "|  - Centres des clusters   :" << std::endl;
-    for (int i = 0; i < 4; ++i) {
-        std::cout << "|    * Cluster " << i << ": (" << std::fixed << std::setprecision(1) 
-                  << cluster_centers[i][0] << ", " << cluster_centers[i][1] 
-                  << ") σ=" << cluster_std[i] << std::endl;
-    }
-    std::cout << "+-" << std::endl;
-    
+    std::vector<std::array<real, 2>> centers = {{-1.5, -1.5}, {1.5, -1.5}, {-1.5, 1.5}, {1.5, 1.5}};
+    std::vector<real> stds = {0.4, 0.35, 0.45, 0.38};
     int samples_per_class = num_samples / 4;
     
     for (int class_id = 0; class_id < 4; ++class_id) {
-        std::normal_distribution<real> normal_x(cluster_centers[class_id][0], cluster_std[class_id]);
-        std::normal_distribution<real> normal_y(cluster_centers[class_id][1], cluster_std[class_id]);
+        std::normal_distribution<real> normal_x(centers[class_id][0], stds[class_id]);
+        std::normal_distribution<real> normal_y(centers[class_id][1], stds[class_id]);
         
         for (int i = 0; i < samples_per_class; ++i) {
             int sample_idx = class_id * samples_per_class + i;
-            
-            // Génération selon distribution gaussienne
-            real x = normal_x(gen);
-            real y = normal_y(gen);
-            
-            h_inputs(sample_idx, 0) = x;
-            h_inputs(sample_idx, 1) = y;
-            
-            // Encodage one-hot pour les classes
+            data.h_inputs(sample_idx, 0) = normal_x(gen);
+            data.h_inputs(sample_idx, 1) = normal_y(gen);
             for (int j = 0; j < 4; ++j) {
-                h_outputs(sample_idx, j) = (j == class_id) ? 1.0 : 0.0;
+                data.h_outputs(sample_idx, j) = (j == class_id) ? 1.0 : 0.0;
             }
         }
     }
     
-    auto train_inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), h_inputs);
-    auto train_outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), h_outputs);
+    data.inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_inputs);
+    data.outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_outputs);
+    
+    auto [train_idx, test_idx] = train_test_split(num_samples, 0.8, gen);
+    data.train_indices = std::move(train_idx);
+    data.test_indices = std::move(test_idx);
+    return data;
+}
 
-    print_section_header("ENTRAINEMENT EN COURS", '-', 70);
-    std::cout << "+- Parametres:" << std::endl;
-    std::cout << "|  - Epoques         : " << epochs << std::endl;
-    std::cout << "|  - Taille batch    : " << batch_size << std::endl;
-    std::cout << "|  - Echantillons    : " << num_samples << std::endl;
-    std::cout << "|  - Taux apprentis. : " << learning_rate << std::endl;
-    std::cout << "+-" << std::endl;
-    std::cout << "\n+- Progression:" << std::endl;
+TrainingConfig get_timeseries_config() {
+    return {
+        "SERIES TEMPORELLES", "Regression sequentielle - Prediction de series temporelles",
+        {{0, 10}, {1, 40}, {2, 30}, {3, 20}, {4, 10}, {5, 1}}, {"relu", "relu", "relu", "relu", "linear"},
+        0.01, 500, 0.005, 500, 10, 2000, 1e-5, 20
+    };
+}
 
-    // Séparation des données : 80 % apprentissage / 20 % test
-    auto [indices, test_indices] = train_test_split(num_samples, 0.8, gen);
+TrainingData generate_timeseries_data(int num_samples, std::mt19937& gen) {
+    TrainingData data;
+    data.input_dim = 10; data.output_dim = 1;
+    data.h_inputs = TrainingData::HostView2D("timeseries_inputs", num_samples, 10);
+    data.h_outputs = TrainingData::HostView2D("timeseries_outputs", num_samples, 1);
+    
+    std::uniform_real_distribution<real> freq1_dist(0.1, 0.3);
+    std::uniform_real_distribution<real> freq2_dist(0.2, 0.8);
+    std::uniform_real_distribution<real> amp_dist(0.5, 1.5);
+    std::uniform_real_distribution<real> phase_dist(0, 2 * M_PI);
+    std::uniform_real_distribution<real> noise_dist(-0.1, 0.1);
+    
+    for (int sample = 0; sample < num_samples; ++sample) {
+        real freq1 = freq1_dist(gen), freq2 = freq2_dist(gen);
+        real amp1 = amp_dist(gen), amp2 = amp_dist(gen);
+        real phase1 = phase_dist(gen), phase2 = phase_dist(gen);
+        
+        std::vector<real> time_series(11);
+        for (int t = 0; t < 11; ++t) {
+            time_series[t] = amp1 * std::sin(freq1 * t + phase1) + 
+                           amp2 * std::sin(freq2 * t + phase2) + noise_dist(gen);
+        }
+        
+        for (int i = 0; i < 10; ++i) {
+            data.h_inputs(sample, i) = time_series[i];
+        }
+        data.h_outputs(sample, 0) = time_series[10];
+    }
+    
+    data.inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_inputs);
+    data.outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_outputs);
+    
+    auto [train_idx, test_idx] = train_test_split(num_samples, 0.8, gen);
+    data.train_indices = std::move(train_idx);
+    data.test_indices = std::move(test_idx);
+    return data;
+}
 
-    for (int epoch = 0; epoch < epochs; ++epoch) {
-        real total_epoch_cost = 0.0;
-        std::shuffle(indices.begin(), indices.end(), gen);
-        
-        for (int batch_start = 0; batch_start < static_cast<int>(indices.size()); batch_start += batch_size) {
-            int current_batch_size = std::min(batch_size, static_cast<int>(indices.size()) - batch_start);
-            if (current_batch_size <= 0) continue;
-            
-            dnn.zero_accumulated_gradients();
-            for (int j = 0; j < current_batch_size; ++j) {
-                int sample_index = indices[batch_start + j];
-                auto input_subview = Kokkos::subview(train_inputs, sample_index, Kokkos::ALL());
-                auto target_subview = Kokkos::subview(train_outputs, sample_index, Kokkos::ALL());
-                View1D prediction = dnn.forward(input_subview);
-                total_epoch_cost += dnn.calculate_cost(prediction, target_subview);
-                dnn.backward(target_subview);
-            }
-            dnn.update(current_batch_size);
-        }
-        
-        real avg_cost = total_epoch_cost / indices.size();
-        if ((epoch + 1) % (epochs / 20) == 0 || epoch == 0 || epoch == epochs - 1) {
-            print_training_progress(epoch + 1, epochs, avg_cost, epoch == epochs - 1);
-        }
-        
-        if (avg_cost < 1e-4) {
-            std::cout << "| Convergence atteinte a l'epoque " << epoch + 1 << " !" << std::endl;
-            break;
-        }
-    }
-    std::cout << "+-" << std::endl;
+void gaussian_clusters_train(const std::string& optimizer_choice) {
+    auto config = get_gaussian_config();
+    run_simple_test(config, [&config](std::mt19937& gen) { return generate_gaussian_data(config.num_samples, gen); }, optimizer_choice);
+}
 
-    print_predictions_header("CLUSTERS GAUSSIENS - CLASSIFICATION 4 CLASSES");
-    View1D prediction_result("prediction_result_gaussian", output_dim);
-    auto h_prediction_result = Kokkos::create_mirror_view(prediction_result);
-    real final_total_cost = 0.0; 
-    int correct_predictions = 0;
-    std::vector<int> class_correct(4, 0);
-    std::vector<int> class_total(4, 0);
-    
-    // Matrice de confusion
-    std::vector<std::vector<int>> confusion_matrix(4, std::vector<int>(4, 0));
-    
-    // Calcul des statistiques complètes (jeu de test)
-    for (int idx : test_indices) {
-        int i = idx;
-        auto input_subview = Kokkos::subview(train_inputs, i, Kokkos::ALL());
-        auto target_subview = Kokkos::subview(train_outputs, i, Kokkos::ALL());
-        View1D prediction = dnn.forward(input_subview);
-        final_total_cost += dnn.calculate_cost(prediction, target_subview);
-        
-        Kokkos::deep_copy(prediction_result, prediction);
-        Kokkos::deep_copy(h_prediction_result, prediction_result); 
-        Kokkos::fence();
-        
-        // Trouver la classe prédite (argmax)
-        int predicted_class = 0;
-        real max_pred = h_prediction_result(0);
-        for (int c = 1; c < 4; ++c) {
-            if (h_prediction_result(c) > max_pred) {
-                max_pred = h_prediction_result(c);
-                predicted_class = c;
-            }
-        }
-        
-        // Trouver la vraie classe
-        int true_class = 0;
-        for (int c = 0; c < 4; ++c) {
-            if (h_outputs(i, c) > 0.5) {
-                true_class = c;
-                break;
-            }
-        }
-        
-        class_total[true_class]++;
-        confusion_matrix[true_class][predicted_class]++;
-        if (predicted_class == true_class) {
-            correct_predictions++;
-            class_correct[true_class]++;
-        }
-    }
-    
-    real accuracy = static_cast<real>(correct_predictions) / test_indices.size();
-    
-    std::cout << "+- Echantillons de prediction (3 premiers par classe):" << std::endl;
-    std::cout << "|" << std::endl;
-    std::cout << "|  Coordonnees  | Cluster | Predictions [C0,C1,C2,C3] | Pred | Status" << std::endl;
-    std::cout << "| ----------------------------------------------------------------" << std::endl;
-    
-    // Affichage de 3 échantillons par classe
-    for (int class_id = 0; class_id < 4; ++class_id) {
-        for (int k = 0; k < 3; ++k) {
-            int i = class_id * samples_per_class + k;
-            auto input_subview = Kokkos::subview(train_inputs, i, Kokkos::ALL());
-            auto target_subview = Kokkos::subview(train_outputs, i, Kokkos::ALL());
-            View1D prediction = dnn.forward(input_subview);
-            
-            Kokkos::deep_copy(prediction_result, prediction);
-            Kokkos::deep_copy(h_prediction_result, prediction_result); 
-            Kokkos::fence();
-            
-            int predicted_class = 0;
-            real max_pred = h_prediction_result(0);
-            for (int c = 1; c < 4; ++c) {
-                if (h_prediction_result(c) > max_pred) {
-                    max_pred = h_prediction_result(c);
-                    predicted_class = c;
-                }
-            }
-            
-            std::cout << "| [" << std::fixed << std::setprecision(2) << std::setw(5) << h_inputs(i,0) 
-                      << "," << std::setw(5) << h_inputs(i,1) << "] |    " << class_id << "    | [" 
-                      << std::setprecision(2) << std::setw(3) << h_prediction_result(0) << ","
-                      << std::setw(3) << h_prediction_result(1) << "," << std::setw(3) << h_prediction_result(2) 
-                      << "," << std::setw(3) << h_prediction_result(3) << "] |  " 
-                      << predicted_class << "   | ";
-            
-            if (predicted_class == class_id) {
-                std::cout << "OK";
-            } else {
-                std::cout << "ERR";
-            }
-            std::cout << std::endl;
-        }
-    }
-    
-    std::cout << "|" << std::endl;
-    std::cout << "+- RESULTATS FINAUX:" << std::endl;
-    std::cout << "|  - Cout final moyen (test): " << std::scientific << std::setprecision(4) << final_total_cost / test_indices.size() << std::endl;
-    std::cout << "|  - Precision globale (test): " << std::fixed << std::setprecision(2) << accuracy * 100.0 << "%" << std::endl;
-    std::cout << "|  - Echantillons OK  : " << correct_predictions << "/" << test_indices.size() << std::endl;
-    std::cout << "|" << std::endl;
-    std::cout << "|  - Precision par cluster:" << std::endl;
-    
-    for (int c = 0; c < 4; ++c) {
-        real class_accuracy = (class_total[c] > 0) ? static_cast<real>(class_correct[c]) / class_total[c] : 0.0;
-        std::cout << "|    * Cluster " << c << "        : " << std::setprecision(1) << class_accuracy * 100.0 
-                  << "% (" << class_correct[c] << "/" << class_total[c] << ")" << std::endl;
-    }
-    
-    std::cout << "|" << std::endl;
-    std::cout << "|  - Matrice de confusion:" << std::endl;
-    std::cout << "|         |  Predite ->  | C0 | C1 | C2 | C3 |" << std::endl;
-    std::cout << "|    -----|-------------|----|----|----|----|" << std::endl;
-    for (int true_c = 0; true_c < 4; ++true_c) {
-        std::cout << "|    Vraie|      C" << true_c << "     |";
-        for (int pred_c = 0; pred_c < 4; ++pred_c) {
-            std::cout << std::setw(3) << confusion_matrix[true_c][pred_c] << " |";
-        }
-        std::cout << std::endl;
-    }
-    
-    if (accuracy >= 0.92) {
-        std::cout << "|  - Qualite         : Excellent (>=92%)" << std::endl;
-    } else if (accuracy >= 0.80) {
-        std::cout << "|  - Qualite         : Bon (>=80%)" << std::endl;
-    } else {
-        std::cout << "|  - Qualite         : A ameliorer (<80%)" << std::endl;
-    }
-    std::cout << "+-" << std::endl;
+void spiral_train(const std::string& optimizer_choice) {
+    auto config = get_spiral_config();
+    run_simple_test(config, [&config](std::mt19937& gen) { return generate_spiral_data(config.num_samples, gen); }, optimizer_choice);
 }
 
 void time_series_train(const std::string& optimizer_choice) {
-    print_separator("PREDICTION SERIES TEMPORELLES", '=', 80);
-    std::cout << "Probleme: Regression sequentielle - Prediction de series temporelles" << std::endl;
-    std::cout << "Donnees: Fenetres temporelles de 10 points -> predire le 11eme point" << std::endl;
-    std::cout << "Originalite: Frequences aleatoires par echantillon (pas de valeurs fixes!)" << std::endl;
-    std::cout << "Optimiseur: " << optimizer_choice << std::endl;
-
-    // Structure du réseau pour séries temporelles
-    std::map<int, int> sizes;
-    sizes[0] = 10; sizes[1] = 80; sizes[2] = 60; sizes[3] = 40; sizes[4] = 20; sizes[5] = 1;  // 10 entrées temporelles -> 1 prédiction
-    std::vector<std::string> activations = {"relu", "relu", "relu", "relu", "linear"};
-
-    // Paramètres d'entraînement
-    real learning_rate; 
-    int epochs; 
-    int batch_size = 10; 
-    int num_samples = 4000; // Plus d'échantillons pour la variabilité
-    std::unique_ptr<Optimizer> optimizer;
-    
-    if (optimizer_choice == "sgd") {
-        learning_rate = 0.01; 
-        epochs = 1000;
-        optimizer = std::make_unique<SGD>(learning_rate);
-    } else { // adam default
-        learning_rate = 0.005; 
-        epochs = 1000;
-        optimizer = std::make_unique<Adam>(learning_rate);
-    }
-
-    Network dnn(sizes, activations, std::move(optimizer));
-    
-    // Affichage de l'architecture
-    print_network_architecture(dnn);
-
-    // Génération des données de séries temporelles
-    using HostView2D = Kokkos::View<real**, Kokkos::HostSpace>;
-    const int input_dim = sizes.at(0); // 10 points temporels
-    const int output_dim = sizes.at(sizes.size()-1); // 1 prédiction
-    HostView2D h_inputs("h_timeseries_inputs", num_samples, input_dim);
-    HostView2D h_outputs("h_timeseries_outputs", num_samples, output_dim);
-    
-    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count() + 1001);
-    std::uniform_real_distribution<real> freq1_dist(0.1, 0.8);  // Première fréquence aléatoire
-    std::uniform_real_distribution<real> freq2_dist(0.2, 1.2);  // Deuxième fréquence aléatoire  
-    std::uniform_real_distribution<real> amp1_dist(0.3, 1.0);   // Amplitude 1 aléatoire
-    std::uniform_real_distribution<real> amp2_dist(0.2, 0.8);   // Amplitude 2 aléatoire
-    std::uniform_real_distribution<real> phase_dist(0.0, 2.0 * M_PI); // Phase aléatoire
-    std::uniform_real_distribution<real> noise_dist(-0.05, 0.05); // Bruit léger
-    
-    print_section_header("GENERATION DES SERIES TEMPORELLES", '-', 70);
-    std::cout << "+- Parametres de generation (ALEATOIRES par echantillon):" << std::endl;
-    std::cout << "|  - Nombre d'echantillons  : " << num_samples << std::endl;
-    std::cout << "|  - Fenetre temporelle     : " << input_dim << " points" << std::endl;
-    std::cout << "|  - Frequence 1            : [0.1, 0.8] (aleatoire)" << std::endl;
-    std::cout << "|  - Frequence 2            : [0.2, 1.2] (aleatoire)" << std::endl;
-    std::cout << "|  - Amplitude 1            : [0.3, 1.0] (aleatoire)" << std::endl;
-    std::cout << "|  - Amplitude 2            : [0.2, 0.8] (aleatoire)" << std::endl;
-    std::cout << "|  - Phase                  : [0, 2π] (aleatoire)" << std::endl;
-    std::cout << "|  - Bruit                  : [-0.05, 0.05]" << std::endl;
-    std::cout << "+-" << std::endl;
-    
-    // Génération des échantillons avec paramètres aléatoires
-    for (int sample = 0; sample < num_samples; ++sample) {
-        // Paramètres aléatoires pour cet échantillon
-        real freq1 = freq1_dist(gen);
-        real freq2 = freq2_dist(gen);
-        real amp1 = amp1_dist(gen);
-        real amp2 = amp2_dist(gen);
-        real phase1 = phase_dist(gen);
-        real phase2 = phase_dist(gen);
-        
-        // Générer une série temporelle de longueur (input_dim + 1)
-        std::vector<real> time_series(input_dim + 1);
-        for (int t = 0; t < input_dim + 1; ++t) {
-            real base_signal = amp1 * std::sin(freq1 * t + phase1) + 
-                              amp2 * std::sin(freq2 * t + phase2);
-            time_series[t] = base_signal + noise_dist(gen);
-        }
-        
-        // Les 10 premiers points sont l'entrée
-        for (int i = 0; i < input_dim; ++i) {
-            h_inputs(sample, i) = time_series[i];
-        }
-        
-        // Le 11ème point est la cible à prédire
-        h_outputs(sample, 0) = time_series[input_dim];
-    }
-    
-    auto train_inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), h_inputs);
-    auto train_outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), h_outputs);
-
-    print_section_header("ENTRAINEMENT EN COURS", '-', 70);
-    std::cout << "+- Parametres:" << std::endl;
-    std::cout << "|  - Epoques         : " << epochs << std::endl;
-    std::cout << "|  - Taille batch    : " << batch_size << std::endl;
-    std::cout << "|  - Echantillons    : " << num_samples << std::endl;
-    std::cout << "|  - Taux apprentis. : " << learning_rate << std::endl;
-    std::cout << "+-" << std::endl;
-    std::cout << "\n+- Progression:" << std::endl;
-
-    // Séparation des données : 80 % apprentissage / 20 % test
-    auto [indices, test_indices] = train_test_split(num_samples, 0.8, gen);
-
-    for (int epoch = 0; epoch < epochs; ++epoch) {
-        real total_epoch_cost = 0.0;
-        std::shuffle(indices.begin(), indices.end(), gen);
-        
-        for (int batch_start = 0; batch_start < static_cast<int>(indices.size()); batch_start += batch_size) {
-            int current_batch_size = std::min(batch_size, static_cast<int>(indices.size()) - batch_start);
-            if (current_batch_size <= 0) continue;
-            
-            dnn.zero_accumulated_gradients();
-            for (int j = 0; j < current_batch_size; ++j) {
-                int sample_index = indices[batch_start + j];
-                auto input_subview = Kokkos::subview(train_inputs, sample_index, Kokkos::ALL());
-                auto target_subview = Kokkos::subview(train_outputs, sample_index, Kokkos::ALL());
-                View1D prediction = dnn.forward(input_subview);
-                total_epoch_cost += dnn.calculate_cost(prediction, target_subview);
-                dnn.backward(target_subview);
-            }
-            dnn.update(current_batch_size);
-        }
-        
-        real avg_cost = total_epoch_cost / indices.size();
-        if ((epoch + 1) % (epochs / 20) == 0 || epoch == 0 || epoch == epochs - 1) {
-            print_training_progress(epoch + 1, epochs, avg_cost, epoch == epochs - 1);
-        }
-        
-        if (avg_cost < 1e-5) {
-            std::cout << "| Convergence atteinte a l'epoque " << epoch + 1 << " !" << std::endl;
-            break;
-        }
-    }
-    std::cout << "+-" << std::endl;
-
-    print_predictions_header("SERIES TEMPORELLES - PREDICTION SEQUENTIELLE");
-    View1D prediction_result("prediction_result_timeseries", output_dim);
-    auto h_prediction_result = Kokkos::create_mirror_view(prediction_result);
-    real final_total_cost = 0.0; 
-    real total_abs_error = 0.0;
-    real max_error = 0.0;
-    
-    // Test sur quelques échantillons pour évaluation
-    int num_test_samples = std::min(15, num_samples);
-    
-    std::cout << "+- Echantillons de prediction:" << std::endl;
-    std::cout << "|" << std::endl;
-    std::cout << "|  Sequence (10 derniers points)     | Cible  | Pred.  | Erreur | Qualite" << std::endl;
-    std::cout << "| ---------------------------------------------------------------------------" << std::endl;
-    
-    for (int i = 0; i < num_test_samples; ++i) {
-        auto input_subview = Kokkos::subview(train_inputs, i, Kokkos::ALL());
-        auto target_subview = Kokkos::subview(train_outputs, i, Kokkos::ALL());
-        View1D prediction = dnn.forward(input_subview);
-        
-        real cost = dnn.calculate_cost(prediction, target_subview);
-        final_total_cost += cost;
-        
-        Kokkos::deep_copy(prediction_result, prediction);
-        Kokkos::deep_copy(h_prediction_result, prediction_result); 
-        Kokkos::fence();
-        
-        real target_value = h_outputs(i, 0);
-        real predicted_value = h_prediction_result(0);
-        real abs_error = std::abs(target_value - predicted_value);
-        total_abs_error += abs_error;
-        max_error = std::max(max_error, abs_error);
-        
-        // Affichage de la séquence (derniers 4 points pour économiser l'espace)
-        std::cout << "| [";
-        for (int t = 6; t < 10; ++t) {  // Derniers 4 points de la fenêtre
-            std::cout << std::fixed << std::setprecision(2) << std::setw(5) << h_inputs(i, t);
-            if (t < 9) std::cout << ",";
-        }
-        std::cout << "...] | " << std::setprecision(3) << std::setw(6) << target_value 
-                  << " | " << std::setw(6) << predicted_value 
-                  << " | " << std::setw(6) << abs_error << " | ";
-        
-        if (abs_error < 0.05) {
-            std::cout << "Excellent";
-        } else if (abs_error < 0.15) {
-            std::cout << "Bon";
-        } else if (abs_error < 0.3) {
-            std::cout << "Moyen";
-        } else {
-            std::cout << "Faible";
-        }
-        std::cout << std::endl;
-    }
-    
-    // Calcul des métriques sur le jeu de test
-    real total_test_error = 0.0;
-    real total_test_cost = 0.0;
-    for (int idx : test_indices) {
-        int i = idx;
-        auto input_subview = Kokkos::subview(train_inputs, i, Kokkos::ALL());
-        auto target_subview = Kokkos::subview(train_outputs, i, Kokkos::ALL());
-        View1D prediction = dnn.forward(input_subview);
-        
-        total_test_cost += dnn.calculate_cost(prediction, target_subview);
-        
-        Kokkos::deep_copy(prediction_result, prediction);
-        Kokkos::deep_copy(h_prediction_result, prediction_result); 
-        Kokkos::fence();
-        
-        real abs_error = std::abs(h_outputs(i, 0) - h_prediction_result(0));
-        total_test_error += abs_error;
-    }
-    
-    real avg_abs_error = total_test_error / test_indices.size();
-    real avg_cost = total_test_cost / test_indices.size();
-    
-    std::cout << "|" << std::endl;
-    std::cout << "+- RESULTATS FINAUX:" << std::endl;
-    std::cout << "|  - Cout final moyen (test): " << std::scientific << std::setprecision(4) << avg_cost << std::endl;
-    std::cout << "|  - Erreur absolue moy. (test): " << std::fixed << std::setprecision(4) << avg_abs_error << std::endl;
-    std::cout << "|  - Erreur absolue max (test): " << std::setprecision(4) << max_error << std::endl;
-    std::cout << "|  - Echantillons testes  : " << test_indices.size() << std::endl;
-    std::cout << "|" << std::endl;
-    std::cout << "|  - Performance temporelle:" << std::endl;
-    
-    if (avg_abs_error < 0.08) {
-        std::cout << "|    * Prediction        : Excellente (err < 0.08)" << std::endl;
-    } else if (avg_abs_error < 0.15) {
-        std::cout << "|    * Prediction        : Bonne (err < 0.15)" << std::endl;
-    } else if (avg_abs_error < 0.25) {
-        std::cout << "|    * Prediction        : Moyenne (err < 0.25)" << std::endl;
-    } else {
-        std::cout << "|    * Prediction        : A ameliorer (err >= 0.25)" << std::endl;
-    }
-    
-    std::cout << "|    * Capacite adapt.   : Le reseau apprend sans freq. fixes!" << std::endl;
-    std::cout << "|    * Robustesse        : Teste sur " << num_samples << " patterns differents" << std::endl;
-    std::cout << "+-" << std::endl;
+    auto config = get_timeseries_config();
+    run_simple_test(config, [&config](std::mt19937& gen) { return generate_timeseries_data(config.num_samples, gen); }, optimizer_choice);
 } 
