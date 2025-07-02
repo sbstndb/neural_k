@@ -70,4 +70,35 @@ public:
     
     // Applique la sparsité avec masque permanent (empêche la récupération)
     void apply_permanent_sparsity(real threshold);
+    
+    // === NOUVELLES MÉTHODES POUR DÉTECTION ET CONVERSION AUTOMATIQUE ===
+    
+    // Détecte si une matrice est déjà sparse (taux de zéros > threshold)
+    bool is_sparse(real sparsity_threshold = 0.5) const;
+    
+    // Convertit automatiquement en sparse si nécessaire
+    void auto_convert_to_sparse(real sparsity_threshold = 0.5, real weight_threshold = 0.01);
+    
+    // Optimise la structure CSR en supprimant les zéros exacts
+    void optimize_csr_structure();
+    
+    // Affiche un rapport complet de sparsité
+    void sparsity_report() const;
+    
+    // === NOUVELLES MÉTHODES POUR SEUILS ADAPTATIFS ===
+    
+    // Calcule un seuil adaptatif basé sur la distribution des poids
+    real compute_adaptive_threshold(real target_sparsity = 0.3) const;
+    
+    // Applique la sparsité avec seuil adaptatif
+    void apply_adaptive_sparsity(real target_sparsity = 0.3);
+    
+    // Applique la sparsité progressive jusqu'à atteindre la cible
+    void apply_progressive_sparsity(real target_sparsity = 0.3, real max_threshold = 0.5);
+    
+    // Calcule des seuils adaptatifs par couche
+    std::vector<real> compute_layer_adaptive_thresholds(real target_sparsity = 0.3) const;
+    
+    // Applique la sparsité avec seuils différents par couche
+    void apply_layer_adaptive_sparsity(real target_sparsity = 0.3);
 }; 

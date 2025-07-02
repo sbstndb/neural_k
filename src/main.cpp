@@ -67,6 +67,14 @@ int main(int argc, char* argv[]) {
             print_demo_separator(8, "SPARSITÉ DYNAMIQUE - SINUS");
             test_dynamic_sparsity_sine("adam");
 
+            // Démonstration 9: Conversion automatique vers sparse
+            print_demo_separator(9, "CONVERSION AUTOMATIQUE VERS SPARSE");
+            demo_automatic_sparsity_conversion("adam");
+
+            // Démonstration 10: Seuils adaptatifs pour sparsité
+            print_demo_separator(10, "SEUILS ADAPTATIFS POUR SPARSITÉ");
+            demo_adaptive_sparsity_thresholds("adam");
+
         } catch (const std::exception& e) {
             std::cerr << "\nERREUR CRITIQUE:" << std::endl;
             std::cerr << "   " << e.what() << std::endl;
