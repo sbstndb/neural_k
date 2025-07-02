@@ -1,5 +1,6 @@
 #include "training.hpp"
 #include "optimizers.hpp"
+#include <utility>   // std::pair
 
 // === FONCTIONS UTILITAIRES POUR L'AFFICHAGE ===
 
@@ -107,6 +108,20 @@ void print_training_progress(int epoch, int total_epochs, real cost, bool is_fin
 
 void print_predictions_header(const std::string& task_type) {
     print_section_header("PREDICTIONS FINALES - " + task_type, '=', 70);
+}
+
+// === UTILITAIRE GENERIQUE : PARTITION TRAIN / TEST ===
+// Retourne {train_indices, test_indices} après mélange aléatoire.
+std::pair<std::vector<int>, std::vector<int>> train_test_split(int num_samples,
+                                                              double train_ratio,
+                                                              std::mt19937& gen) {
+    std::vector<int> all_indices(num_samples);
+    std::iota(all_indices.begin(), all_indices.end(), 0);
+    std::shuffle(all_indices.begin(), all_indices.end(), gen);
+    int split = static_cast<int>(train_ratio * num_samples);
+    std::vector<int> train_indices(all_indices.begin(), all_indices.begin() + split);
+    std::vector<int> test_indices (all_indices.begin() + split, all_indices.end());
+    return {std::move(train_indices), std::move(test_indices)};
 }
 
 void xor_train(const std::string& optimizer_choice) {
@@ -235,7 +250,7 @@ void sine_train(const std::string& optimizer_choice) {
     sizes[0] = 1; sizes[1] = 32; sizes[2] = 32; sizes[3] = 1;
     std::vector<std::string> activations = {"relu", "relu", "linear"};
 
-    real learning_rate; int epochs; int batch_size = 16; int num_samples = 2048*4;
+    real learning_rate; int epochs; int batch_size = 16; int num_samples = 2048;
     std::unique_ptr<Optimizer> optimizer;
     if (optimizer_choice == "sgd") {
         learning_rate = 0.02; epochs = 500;
@@ -273,13 +288,14 @@ void sine_train(const std::string& optimizer_choice) {
     std::cout << "+-" << std::endl;
     std::cout << "\n+- Progression:" << std::endl;
 
-    std::vector<int> indices(num_samples); std::iota(indices.begin(), indices.end(), 0);
+    // Séparation des données : 80 % apprentissage / 20 % test
+    auto [indices, test_indices] = train_test_split(num_samples, 0.8, gen);
 
     for (int epoch = 0; epoch < epochs; ++epoch) {
         real total_epoch_cost = 0.0;
         std::shuffle(indices.begin(), indices.end(), gen);
-        for (int batch_start = 0; batch_start < num_samples; batch_start += batch_size) {
-            int current_batch_size = std::min(batch_size, num_samples - batch_start);
+        for (int batch_start = 0; batch_start < static_cast<int>(indices.size()); batch_start += batch_size) {
+            int current_batch_size = std::min(batch_size, static_cast<int>(indices.size()) - batch_start);
             if (current_batch_size <= 0) continue;
             dnn.zero_accumulated_gradients();
             for (int j = 0; j < current_batch_size; ++j) {
@@ -292,7 +308,7 @@ void sine_train(const std::string& optimizer_choice) {
             }
             dnn.update(current_batch_size);
         }
-        real avg_cost = total_epoch_cost / num_samples;
+        real avg_cost = total_epoch_cost / indices.size();
         if ((epoch + 1) % (epochs / 20) == 0 || epoch == 0 || epoch == epochs - 1) {
              print_training_progress(epoch + 1, epochs, avg_cost, epoch == epochs - 1);
         }
@@ -302,14 +318,15 @@ void sine_train(const std::string& optimizer_choice) {
     print_predictions_header("SINUS");
     View1D prediction_result("prediction_result_sine", output_dim);
     auto h_prediction_result = Kokkos::create_mirror_view(prediction_result);
-    real final_total_cost = 0.0; int num_test_samples = std::min(num_samples, 10);
+    real final_total_cost = 0.0; int num_test_samples = std::min(static_cast<int>(test_indices.size()), 10);
     
     std::cout << "+- Echantillons de prediction:" << std::endl;
     std::cout << "|" << std::endl;
     std::cout << "|    x     | sin(x) cible | Prediction | Erreur abs | Qualite" << std::endl;
     std::cout << "| --------------------------------------------------------" << std::endl;
     
-    for (int i = 0; i < num_test_samples; ++i) {
+    for (int k = 0; k < num_test_samples; ++k) {
+        int i = test_indices[k];
         auto input_subview = Kokkos::subview(train_inputs, i, Kokkos::ALL());
         auto target_subview = Kokkos::subview(train_outputs, i, Kokkos::ALL());
         View1D prediction = dnn.forward(input_subview);
@@ -334,8 +351,10 @@ void sine_train(const std::string& optimizer_choice) {
         }
         std::cout << std::endl;
     }
+    
     std::cout << "|" << std::endl;
-    std::cout << "| Cout final moyen: " << std::scientific << std::setprecision(4) << final_total_cost / num_test_samples << std::endl;
+    std::cout << "+- RESULTATS FINAUX:" << std::endl;
+    std::cout << "|  - Cout final moyen (test): " << std::scientific << std::setprecision(4) << final_total_cost / test_indices.size() << std::endl;
     std::cout << "+-" << std::endl;
 }
 
@@ -396,13 +415,14 @@ void linear_sep_train(const std::string& optimizer_choice) {
     std::cout << "+-" << std::endl;
     std::cout << "\n+- Progression:" << std::endl;
 
-    std::vector<int> indices(num_samples); std::iota(indices.begin(), indices.end(), 0);
+    // Séparation des données : 80 % apprentissage / 20 % test
+    auto [indices, test_indices] = train_test_split(num_samples, 0.8, gen);
 
     for (int epoch = 0; epoch < epochs; ++epoch) {
         real total_epoch_cost = 0.0;
         std::shuffle(indices.begin(), indices.end(), gen);
-        for (int batch_start = 0; batch_start < num_samples; batch_start += batch_size) {
-            int current_batch_size = std::min(batch_size, num_samples - batch_start);
+        for (int batch_start = 0; batch_start < static_cast<int>(indices.size()); batch_start += batch_size) {
+            int current_batch_size = std::min(batch_size, static_cast<int>(indices.size()) - batch_start);
              if (current_batch_size <= 0) continue;
             dnn.zero_accumulated_gradients();
             for (int j = 0; j < current_batch_size; ++j) {
@@ -415,7 +435,7 @@ void linear_sep_train(const std::string& optimizer_choice) {
             }
             dnn.update(current_batch_size);
         }
-        real avg_cost = total_epoch_cost / num_samples;
+        real avg_cost = total_epoch_cost / indices.size();
         if ((epoch + 1) % (epochs / 10) == 0 || epoch == 0 || epoch == epochs - 1) {
              print_training_progress(epoch + 1, epochs, avg_cost, epoch == epochs - 1);
         }
@@ -431,8 +451,9 @@ void linear_sep_train(const std::string& optimizer_choice) {
     auto h_prediction_result = Kokkos::create_mirror_view(prediction_result);
     real final_total_cost = 0.0; int correct_predictions = 0;
     
-    // Calcul des statistiques complètes
-    for (int i = 0; i < num_samples; ++i) {
+    // Calcul des statistiques complètes (jeu de test)
+    for (int idx : test_indices) {
+        int i = idx;
         auto input_subview = Kokkos::subview(train_inputs, i, Kokkos::ALL());
         auto target_subview = Kokkos::subview(train_outputs, i, Kokkos::ALL());
         View1D prediction = dnn.forward(input_subview);
@@ -444,7 +465,7 @@ void linear_sep_train(const std::string& optimizer_choice) {
         int target_class = static_cast<int>(h_outputs(i, 0));
         if (predicted_class == target_class) correct_predictions++;
     }
-    real accuracy = static_cast<real>(correct_predictions) / num_samples;
+    real accuracy = static_cast<real>(correct_predictions) / test_indices.size();
     
     std::cout << "+- Echantillons de prediction (premiers 10):" << std::endl;
     std::cout << "|" << std::endl;
@@ -452,7 +473,8 @@ void linear_sep_train(const std::string& optimizer_choice) {
     std::cout << "| ------------------------------------------------" << std::endl;
     
     // Affichage des 10 premiers échantillons
-    for (int i = 0; i < std::min(10, num_samples); ++i) {
+    for (int k = 0; k < std::min(10, static_cast<int>(test_indices.size())); ++k) {
+        int i = test_indices[k];
         auto input_subview = Kokkos::subview(train_inputs, i, Kokkos::ALL());
         auto target_subview = Kokkos::subview(train_outputs, i, Kokkos::ALL());
         View1D prediction = dnn.forward(input_subview);
@@ -477,9 +499,9 @@ void linear_sep_train(const std::string& optimizer_choice) {
     
     std::cout << "|" << std::endl;
     std::cout << "+- RESULTATS FINAUX:" << std::endl;
-    std::cout << "|  - Cout final moyen : " << std::scientific << std::setprecision(4) << final_total_cost / num_samples << std::endl;
-    std::cout << "|  - Precision        : " << std::fixed << std::setprecision(2) << accuracy * 100.0 << "%" << std::endl;
-    std::cout << "|  - Echantillons OK  : " << correct_predictions << "/" << num_samples << std::endl;
+    std::cout << "|  - Cout final moyen (test): " << std::scientific << std::setprecision(4) << final_total_cost / test_indices.size() << std::endl;
+    std::cout << "|  - Precision (test) : " << std::fixed << std::setprecision(2) << accuracy * 100.0 << "%" << std::endl;
+    std::cout << "|  - Echantillons OK  : " << correct_predictions << "/" << test_indices.size() << std::endl;
     
     if (accuracy >= 0.95) {
         std::cout << "|  - Qualite         : Excellent (>=95%)" << std::endl;
@@ -580,15 +602,15 @@ void spiral_train(const std::string& optimizer_choice) {
     std::cout << "+-" << std::endl;
     std::cout << "\n+- Progression:" << std::endl;
 
-    std::vector<int> indices(num_samples); 
-    std::iota(indices.begin(), indices.end(), 0);
+    // Séparation des données : 80 % apprentissage / 20 % test
+    auto [indices, test_indices] = train_test_split(num_samples, 0.8, gen);
 
     for (int epoch = 0; epoch < epochs; ++epoch) {
         real total_epoch_cost = 0.0;
         std::shuffle(indices.begin(), indices.end(), gen);
         
-        for (int batch_start = 0; batch_start < num_samples; batch_start += batch_size) {
-            int current_batch_size = std::min(batch_size, num_samples - batch_start);
+        for (int batch_start = 0; batch_start < static_cast<int>(indices.size()); batch_start += batch_size) {
+            int current_batch_size = std::min(batch_size, static_cast<int>(indices.size()) - batch_start);
             if (current_batch_size <= 0) continue;
             
             dnn.zero_accumulated_gradients();
@@ -603,7 +625,7 @@ void spiral_train(const std::string& optimizer_choice) {
             dnn.update(current_batch_size);
         }
         
-        real avg_cost = total_epoch_cost / num_samples;
+        real avg_cost = total_epoch_cost / indices.size();
         if ((epoch + 1) % (epochs / 20) == 0 || epoch == 0 || epoch == epochs - 1) {
             print_training_progress(epoch + 1, epochs, avg_cost, epoch == epochs - 1);
         }
@@ -623,8 +645,9 @@ void spiral_train(const std::string& optimizer_choice) {
     std::vector<int> class_correct(3, 0);
     std::vector<int> class_total(3, 0);
     
-    // Calcul des statistiques complètes
-    for (int i = 0; i < num_samples; ++i) {
+    // Calcul des statistiques complètes (jeu de test)
+    for (int idx : test_indices) {
+        int i = idx;
         auto input_subview = Kokkos::subview(train_inputs, i, Kokkos::ALL());
         auto target_subview = Kokkos::subview(train_outputs, i, Kokkos::ALL());
         View1D prediction = dnn.forward(input_subview);
@@ -660,7 +683,7 @@ void spiral_train(const std::string& optimizer_choice) {
         }
     }
     
-    real accuracy = static_cast<real>(correct_predictions) / num_samples;
+    real accuracy = static_cast<real>(correct_predictions) / test_indices.size();
     
     std::cout << "+- Echantillons de prediction (premiers 12):" << std::endl;
     std::cout << "|" << std::endl;
@@ -706,9 +729,9 @@ void spiral_train(const std::string& optimizer_choice) {
     
     std::cout << "|" << std::endl;
     std::cout << "+- RESULTATS FINAUX:" << std::endl;
-    std::cout << "|  - Cout final moyen : " << std::scientific << std::setprecision(4) << final_total_cost / num_samples << std::endl;
-    std::cout << "|  - Precision globale: " << std::fixed << std::setprecision(2) << accuracy * 100.0 << "%" << std::endl;
-    std::cout << "|  - Echantillons OK  : " << correct_predictions << "/" << num_samples << std::endl;
+    std::cout << "|  - Cout final moyen (test): " << std::scientific << std::setprecision(4) << final_total_cost / test_indices.size() << std::endl;
+    std::cout << "|  - Precision globale (test): " << std::fixed << std::setprecision(2) << accuracy * 100.0 << "%" << std::endl;
+    std::cout << "|  - Echantillons OK  : " << correct_predictions << "/" << test_indices.size() << std::endl;
     std::cout << "|" << std::endl;
     std::cout << "|  - Precision par classe:" << std::endl;
     
@@ -826,15 +849,15 @@ void gaussian_clusters_train(const std::string& optimizer_choice) {
     std::cout << "+-" << std::endl;
     std::cout << "\n+- Progression:" << std::endl;
 
-    std::vector<int> indices(num_samples); 
-    std::iota(indices.begin(), indices.end(), 0);
+    // Séparation des données : 80 % apprentissage / 20 % test
+    auto [indices, test_indices] = train_test_split(num_samples, 0.8, gen);
 
     for (int epoch = 0; epoch < epochs; ++epoch) {
         real total_epoch_cost = 0.0;
         std::shuffle(indices.begin(), indices.end(), gen);
         
-        for (int batch_start = 0; batch_start < num_samples; batch_start += batch_size) {
-            int current_batch_size = std::min(batch_size, num_samples - batch_start);
+        for (int batch_start = 0; batch_start < static_cast<int>(indices.size()); batch_start += batch_size) {
+            int current_batch_size = std::min(batch_size, static_cast<int>(indices.size()) - batch_start);
             if (current_batch_size <= 0) continue;
             
             dnn.zero_accumulated_gradients();
@@ -849,7 +872,7 @@ void gaussian_clusters_train(const std::string& optimizer_choice) {
             dnn.update(current_batch_size);
         }
         
-        real avg_cost = total_epoch_cost / num_samples;
+        real avg_cost = total_epoch_cost / indices.size();
         if ((epoch + 1) % (epochs / 20) == 0 || epoch == 0 || epoch == epochs - 1) {
             print_training_progress(epoch + 1, epochs, avg_cost, epoch == epochs - 1);
         }
@@ -872,8 +895,9 @@ void gaussian_clusters_train(const std::string& optimizer_choice) {
     // Matrice de confusion
     std::vector<std::vector<int>> confusion_matrix(4, std::vector<int>(4, 0));
     
-    // Calcul des statistiques complètes
-    for (int i = 0; i < num_samples; ++i) {
+    // Calcul des statistiques complètes (jeu de test)
+    for (int idx : test_indices) {
+        int i = idx;
         auto input_subview = Kokkos::subview(train_inputs, i, Kokkos::ALL());
         auto target_subview = Kokkos::subview(train_outputs, i, Kokkos::ALL());
         View1D prediction = dnn.forward(input_subview);
@@ -910,7 +934,7 @@ void gaussian_clusters_train(const std::string& optimizer_choice) {
         }
     }
     
-    real accuracy = static_cast<real>(correct_predictions) / num_samples;
+    real accuracy = static_cast<real>(correct_predictions) / test_indices.size();
     
     std::cout << "+- Echantillons de prediction (3 premiers par classe):" << std::endl;
     std::cout << "|" << std::endl;
@@ -956,9 +980,9 @@ void gaussian_clusters_train(const std::string& optimizer_choice) {
     
     std::cout << "|" << std::endl;
     std::cout << "+- RESULTATS FINAUX:" << std::endl;
-    std::cout << "|  - Cout final moyen : " << std::scientific << std::setprecision(4) << final_total_cost / num_samples << std::endl;
-    std::cout << "|  - Precision globale: " << std::fixed << std::setprecision(2) << accuracy * 100.0 << "%" << std::endl;
-    std::cout << "|  - Echantillons OK  : " << correct_predictions << "/" << num_samples << std::endl;
+    std::cout << "|  - Cout final moyen (test): " << std::scientific << std::setprecision(4) << final_total_cost / test_indices.size() << std::endl;
+    std::cout << "|  - Precision globale (test): " << std::fixed << std::setprecision(2) << accuracy * 100.0 << "%" << std::endl;
+    std::cout << "|  - Echantillons OK  : " << correct_predictions << "/" << test_indices.size() << std::endl;
     std::cout << "|" << std::endl;
     std::cout << "|  - Precision par cluster:" << std::endl;
     
@@ -1090,15 +1114,15 @@ void time_series_train(const std::string& optimizer_choice) {
     std::cout << "+-" << std::endl;
     std::cout << "\n+- Progression:" << std::endl;
 
-    std::vector<int> indices(num_samples); 
-    std::iota(indices.begin(), indices.end(), 0);
+    // Séparation des données : 80 % apprentissage / 20 % test
+    auto [indices, test_indices] = train_test_split(num_samples, 0.8, gen);
 
     for (int epoch = 0; epoch < epochs; ++epoch) {
         real total_epoch_cost = 0.0;
         std::shuffle(indices.begin(), indices.end(), gen);
         
-        for (int batch_start = 0; batch_start < num_samples; batch_start += batch_size) {
-            int current_batch_size = std::min(batch_size, num_samples - batch_start);
+        for (int batch_start = 0; batch_start < static_cast<int>(indices.size()); batch_start += batch_size) {
+            int current_batch_size = std::min(batch_size, static_cast<int>(indices.size()) - batch_start);
             if (current_batch_size <= 0) continue;
             
             dnn.zero_accumulated_gradients();
@@ -1113,7 +1137,7 @@ void time_series_train(const std::string& optimizer_choice) {
             dnn.update(current_batch_size);
         }
         
-        real avg_cost = total_epoch_cost / num_samples;
+        real avg_cost = total_epoch_cost / indices.size();
         if ((epoch + 1) % (epochs / 20) == 0 || epoch == 0 || epoch == epochs - 1) {
             print_training_progress(epoch + 1, epochs, avg_cost, epoch == epochs - 1);
         }
@@ -1180,10 +1204,11 @@ void time_series_train(const std::string& optimizer_choice) {
         std::cout << std::endl;
     }
     
-    // Calcul des métriques sur tous les échantillons
+    // Calcul des métriques sur le jeu de test
     real total_test_error = 0.0;
     real total_test_cost = 0.0;
-    for (int i = 0; i < num_samples; ++i) {
+    for (int idx : test_indices) {
+        int i = idx;
         auto input_subview = Kokkos::subview(train_inputs, i, Kokkos::ALL());
         auto target_subview = Kokkos::subview(train_outputs, i, Kokkos::ALL());
         View1D prediction = dnn.forward(input_subview);
@@ -1198,15 +1223,15 @@ void time_series_train(const std::string& optimizer_choice) {
         total_test_error += abs_error;
     }
     
-    real avg_abs_error = total_test_error / num_samples;
-    real avg_cost = total_test_cost / num_samples;
+    real avg_abs_error = total_test_error / test_indices.size();
+    real avg_cost = total_test_cost / test_indices.size();
     
     std::cout << "|" << std::endl;
     std::cout << "+- RESULTATS FINAUX:" << std::endl;
-    std::cout << "|  - Cout final moyen     : " << std::scientific << std::setprecision(4) << avg_cost << std::endl;
-    std::cout << "|  - Erreur absolue moy.  : " << std::fixed << std::setprecision(4) << avg_abs_error << std::endl;
-    std::cout << "|  - Erreur absolue max   : " << std::setprecision(4) << max_error << std::endl;
-    std::cout << "|  - Echantillons testes  : " << num_samples << std::endl;
+    std::cout << "|  - Cout final moyen (test): " << std::scientific << std::setprecision(4) << avg_cost << std::endl;
+    std::cout << "|  - Erreur absolue moy. (test): " << std::fixed << std::setprecision(4) << avg_abs_error << std::endl;
+    std::cout << "|  - Erreur absolue max (test): " << std::setprecision(4) << max_error << std::endl;
+    std::cout << "|  - Echantillons testes  : " << test_indices.size() << std::endl;
     std::cout << "|" << std::endl;
     std::cout << "|  - Performance temporelle:" << std::endl;
     

@@ -40,20 +40,20 @@ int main(int argc, char* argv[]) {
             xor_train("adam");
 
             // Démonstration 2: Sinus  
-            //print_demo_separator(2, "SINUS");
-            //sine_train("adam");
+            print_demo_separator(2, "SINUS");
+            sine_train("adam");
 
             // Démonstration 3: Séparation linéaire
-            //print_demo_separator(3, "SEPARATION LINEAIRE");
-            //linear_sep_train("adam");
+            print_demo_separator(3, "SEPARATION LINEAIRE");
+            linear_sep_train("adam");
 
             // Démonstration 4: Classification spirales
-            //print_demo_separator(4, "SPIRALES MULTI-CLASSES");
-            //spiral_train("adam");
+            print_demo_separator(4, "SPIRALES MULTI-CLASSES");
+            spiral_train("adam");
 
             // Démonstration 5: Classification clusters gaussiens
-            //print_demo_separator(5, "CLUSTERS GAUSSIENS");
-            //gaussian_clusters_train("adam");
+            print_demo_separator(5, "CLUSTERS GAUSSIENS");
+            gaussian_clusters_train("adam");
 
             // Démonstration 6: Prédiction séries temporelles 
             print_demo_separator(6, "SERIES TEMPORELLES");
