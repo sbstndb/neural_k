@@ -75,6 +75,18 @@ int main(int argc, char* argv[]) {
             print_demo_separator(10, "SEUILS ADAPTATIFS POUR SPARSITÉ");
             demo_adaptive_sparsity_thresholds("adam");
 
+            // Démonstration 11: Régularisation L1 et masques de sparsité
+            print_demo_separator(11, "RÉGULARISATION L1 ET MASQUES DE SPARSITÉ (SINUS)");
+            demo_l1_regularization_and_masks("adam");
+
+            // Démonstration 12: Stratégies de pruning avancées
+            print_demo_separator(12, "STRATÉGIES DE PRUNING AVANCÉES (SINUS)");
+            demo_advanced_pruning_strategies("adam");
+
+            // Démonstration 13: Pruning équilibré
+            print_demo_separator(13, "PRUNING ÉQUILIBRÉ (SINUS)");
+            demo_balanced_pruning_strategies("adam");
+
         } catch (const std::exception& e) {
             std::cerr << "\nERREUR CRITIQUE:" << std::endl;
             std::cerr << "   " << e.what() << std::endl;

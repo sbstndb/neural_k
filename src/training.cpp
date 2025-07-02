@@ -2,116 +2,21 @@
 #include "optimizers.hpp"
 #include <utility>   // std::pair
 
-// === FONCTIONS UTILITAIRES POUR L'AFFICHAGE ===
+// === FONCTIONS UTILITAIRES MINIMALISTES ===
 
-void print_separator(const std::string& title = "", char border_char = '=', int width = 80) {
-    std::string line(width, border_char);
-    std::cout << line << std::endl;
-    if (!title.empty()) {
-        int padding = (width - title.length() - 2) / 2;
-        int remaining = width - title.length() - 2 - padding;
-        std::string padded_title = std::string(padding, ' ') + title + std::string(remaining, ' ');
-        std::cout << "|" << padded_title << "|" << std::endl;
-        std::cout << line << std::endl;
-    }
+void print_header(const std::string& title) {
+    std::cout << "\n" << title << std::endl;
+    std::cout << std::string(title.length(), '-') << std::endl;
 }
 
-void print_section_header(const std::string& title, char border_char = '-', int width = 70) {
-    std::string line(width, border_char);
-    std::cout << "\n" << line << std::endl;
-    int padding = (width - title.length() - 2) / 2;
-    int remaining = width - title.length() - 2 - padding;
-    std::cout << " " << std::string(padding, ' ') << title << std::string(remaining, ' ') << std::endl;
-    std::cout << line << std::endl;
-}
-
-void print_network_architecture(const Network& network) {
-    print_section_header("ARCHITECTURE DU RESEAU", '-', 70);
-    
-    // Affichage de la structure
-    std::cout << "+- Structure des couches:" << std::endl;
-    std::cout << "|" << std::endl;
-    
-    // Input layer
-    std::cout << "|  ENTREE      : " << std::setw(3) << network.get_size(0) << " neurones" << std::endl;
-    std::cout << "|       |" << std::endl;
-    
-    // Hidden layers
-    int num_hidden = network.num_layers() - 2;
-    for (int i = 0; i < num_hidden; ++i) {
-        int layer_size = network.get_size(i + 1);
-        std::cout << "|  CACHEE " << std::setw(2) << (i+1) << "  : " << std::setw(3) << layer_size << " neurones (activation: RELU)" << std::endl;
-        std::cout << "|       |" << std::endl;
-    }
-    
-    // Output layer
-    std::cout << "|  SORTIE      : " << std::setw(3) << network.get_size(network.num_layers()-1) << " neurones" << std::endl;
-    std::cout << "+-" << std::endl;
-    
-    // Calcul du nombre total de paramètres
-    int total_weights = 0;
-    int total_biases = 0;
-    for (int i = 0; i < network.num_layers() - 1; ++i) {
-        int in_size = network.get_size(i);
-        int out_size = network.get_size(i + 1);
-        total_weights += in_size * out_size;
-        total_biases += out_size;
-    }
-    
-    std::cout << "\nStatistiques:" << std::endl;
-    std::cout << "   - Nombre total de couches    : " << network.num_layers() << std::endl;
-    std::cout << "   - Nombre de couches cachees  : " << num_hidden << std::endl;
-    std::cout << "   - Nombre total de poids      : " << total_weights << std::endl;
-    std::cout << "   - Nombre total de biais      : " << total_biases << std::endl;
-    std::cout << "   - TOTAL PARAMETRES           : " << (total_weights + total_biases) << std::endl;
-    
-    // Informations sur l'optimiseur
-    auto* opt = network.get_optimizer();
-    if (opt) {
-        std::cout << "\nOptimiseur: " << opt->get_info() << std::endl;
-    }
-}
-
-void print_training_progress(int epoch, int total_epochs, real cost, bool is_final = false) {
-    if (is_final) {
-        std::cout << "| FINAL   ";
-    } else {
-        std::cout << "| Epoque " << std::setw(4) << epoch;
-    }
-    
-    // Barre de progression
-    if (!is_final) {
-        int progress = (epoch * 30) / total_epochs;
-        std::cout << " [";
-        for (int i = 0; i < 30; ++i) {
-            if (i < progress) std::cout << "#";
-            else if (i == progress) std::cout << ">";
-            else std::cout << ".";
-        }
-        std::cout << "] ";
-        std::cout << std::setw(3) << (epoch * 100 / total_epochs) << "%";
-    } else {
-        std::cout << " [##############################] 100%";
-    }
-    
-    // Coût
-    std::cout << " | Cout: ";
-    if (cost < 1e-6) {
-        std::cout << std::scientific << std::setprecision(2) << cost;
-    } else if (cost < 1e-3) {
-        std::cout << std::scientific << std::setprecision(2) << cost;
-    } else {
-        std::cout << std::fixed << std::setprecision(6) << cost;
-    }
-    std::cout << std::endl;
-}
-
-void print_predictions_header(const std::string& task_type) {
-    print_section_header("PREDICTIONS FINALES - " + task_type, '=', 70);
+void print_progress(int epoch, int total_epochs, real cost) {
+    int progress = (epoch * 20) / total_epochs;
+    std::cout << "\r[" << std::string(progress, '#') << std::string(20-progress, '.') << "] ";
+    std::cout << epoch << "/" << total_epochs << " | Cost: " << std::scientific << std::setprecision(3) << cost;
+    std::cout.flush();
 }
 
 // === UTILITAIRE GENERIQUE : PARTITION TRAIN / TEST ===
-// Retourne {train_indices, test_indices} après mélange aléatoire.
 std::pair<std::vector<int>, std::vector<int>> train_test_split(int num_samples,
                                                               double train_ratio,
                                                               std::mt19937& gen) {
@@ -124,24 +29,20 @@ std::pair<std::vector<int>, std::vector<int>> train_test_split(int num_samples,
     return {std::move(train_indices), std::move(test_indices)};
 }
 
-// === STRUCTURES ET FONCTIONS GENERIQUES POUR FACTORISATION ===
+// === STRUCTURES ET FONCTIONS GENERIQUES ===
 
 struct TrainingConfig {
     std::string problem_name;
-    std::string description;
     std::map<int, int> network_sizes;
     std::vector<std::string> activations;
     real sgd_lr, sgd_epochs, adam_lr, adam_epochs;
     int batch_size;
     int num_samples;
     real convergence_threshold;
-    int progress_frequency;
-    
-    // === NOUVEAUX PARAMETRES POUR SPARSITÉ DYNAMIQUE ===
-    bool enable_dynamic_sparsity = false;     // Activer la sparsité dynamique
-    real sparsity_threshold = 0.01;           // Seuil de sparsité
-    int sparsity_frequency = 50;              // Fréquence d'application (en époques)
-    int sparsity_start_epoch = 100;           // Époque de début de la sparsité
+    bool enable_dynamic_sparsity = false;
+    real sparsity_threshold = 0.01;
+    int sparsity_frequency = 50;
+    int sparsity_start_epoch = 100;
 };
 
 struct TrainingData {
@@ -168,32 +69,13 @@ real get_learning_rate(const std::string& choice, const TrainingConfig& config) 
     return (choice == "sgd") ? config.sgd_lr : config.adam_lr;
 }
 
-// Fonction générique d'entraînement
+// Fonction générique d'entraînement minimaliste
 void generic_train_network(Network& network, TrainingData& data, const TrainingConfig& config, 
                           const std::string& optimizer_choice, std::mt19937& gen) {
     int epochs = get_epochs(optimizer_choice, config);
-    real learning_rate = get_learning_rate(optimizer_choice, config);
     
-    print_section_header("ENTRAINEMENT EN COURS", '-', 70);
-    std::cout << "+- Parametres:" << std::endl;
-    std::cout << "|  - Epoques         : " << epochs << std::endl;
-    std::cout << "|  - Taille batch    : " << config.batch_size << std::endl;
-    std::cout << "|  - Echantillons    : " << data.train_indices.size() << std::endl;
-    std::cout << "|  - Taux apprentis. : " << learning_rate << std::endl;
+    std::cout << "Training... ";
     
-    // Affichage des paramètres de sparsité dynamique
-    if (config.enable_dynamic_sparsity) {
-        std::cout << "|  - Sparsité dynamique : ACTIVÉE" << std::endl;
-        std::cout << "|    * Seuil          : " << config.sparsity_threshold << std::endl;
-        std::cout << "|    * Fréquence      : toutes les " << config.sparsity_frequency << " époques" << std::endl;
-        std::cout << "|    * Début          : époque " << config.sparsity_start_epoch << std::endl;
-    } else {
-        std::cout << "|  - Sparsité dynamique : DÉSACTIVÉE" << std::endl;
-    }
-    
-    std::cout << "+-" << std::endl;
-    std::cout << "\n+- Progression:" << std::endl;
-
     for (int epoch = 0; epoch < epochs; ++epoch) {
         real total_epoch_cost = 0.0;
         std::shuffle(data.train_indices.begin(), data.train_indices.end(), gen);
@@ -216,48 +98,40 @@ void generic_train_network(Network& network, TrainingData& data, const TrainingC
         
         real avg_cost = total_epoch_cost / data.train_indices.size();
         
-        // === SPARSITÉ DYNAMIQUE ===
-        bool sparsity_applied = false;
+        // Sparsité dynamique
         if (config.enable_dynamic_sparsity && 
             epoch >= config.sparsity_start_epoch && 
             (epoch - config.sparsity_start_epoch) % config.sparsity_frequency == 0) {
-            
-            network.apply_threshold_sparsity(config.sparsity_threshold);
-            sparsity_applied = true;
+            network.apply_threshold_sparsity_silent(config.sparsity_threshold);
         }
         
-        // Affichage de progression avec indication de sparsité
-        if ((epoch + 1) % (epochs / config.progress_frequency) == 0 || epoch == 0 || epoch == epochs - 1) {
-            print_training_progress(epoch + 1, epochs, avg_cost, epoch == epochs - 1);
-            if (sparsity_applied) {
-                std::cout << "|   --> Sparsité appliquée à l'époque " << (epoch + 1) << std::endl;
-            }
+        // Affichage de progression simplifié
+        if (epoch % 50 == 0 || epoch == epochs - 1) {
+            print_progress(epoch + 1, epochs, avg_cost);
         }
         
         if (avg_cost < config.convergence_threshold) {
-            std::cout << "| Convergence atteinte a l'epoque " << epoch + 1 << " !" << std::endl;
+            std::cout << " | Convergence atteinte!" << std::endl;
             break;
         }
     }
-    std::cout << "+-" << std::endl;
+    std::cout << std::endl;
 }
 
-// Fonction générique d'évaluation
-void generic_evaluate_network(Network& network, TrainingData& data, const std::string& task_name) {
-    print_predictions_header(task_name);
+// Fonction générique d'évaluation avec précision
+real generic_evaluate_network(Network& network, TrainingData& data) {
     View1D prediction_result("prediction_result", data.output_dim);
     auto h_prediction_result = Kokkos::create_mirror_view(prediction_result);
     real final_total_cost = 0.0;
     int correct_predictions = 0;
     
-    // Calcul des statistiques sur le jeu de test
     for (int idx : data.test_indices) {
         auto input_subview = Kokkos::subview(data.inputs, idx, Kokkos::ALL());
         auto target_subview = Kokkos::subview(data.outputs, idx, Kokkos::ALL());
         View1D prediction = network.forward(input_subview);
         final_total_cost += network.calculate_cost(prediction, target_subview);
         
-        // Pour classification binaire/multi-classe
+        // Calcul de la précision pour classification
         if (data.output_dim == 1) {
             Kokkos::deep_copy(prediction_result, prediction);
             Kokkos::deep_copy(h_prediction_result, prediction_result); 
@@ -265,76 +139,105 @@ void generic_evaluate_network(Network& network, TrainingData& data, const std::s
             int predicted_class = std::round(h_prediction_result(0));
             int target_class = static_cast<int>(data.h_outputs(idx, 0));
             if (predicted_class == target_class) correct_predictions++;
+        } else if (data.output_dim > 1) {
+            // Classification multi-classes
+            Kokkos::deep_copy(prediction_result, prediction);
+            Kokkos::deep_copy(h_prediction_result, prediction_result);
+            Kokkos::fence();
+            
+            int predicted_class = 0;
+            real max_val = h_prediction_result(0);
+            for (int j = 1; j < data.output_dim; ++j) {
+                if (h_prediction_result(j) > max_val) {
+                    max_val = h_prediction_result(j);
+                    predicted_class = j;
+                }
+            }
+            
+            int target_class = 0;
+            real max_target = data.h_outputs(idx, 0);
+            for (int j = 1; j < data.output_dim; ++j) {
+                if (data.h_outputs(idx, j) > max_target) {
+                    max_target = data.h_outputs(idx, j);
+                    target_class = j;
+                }
+            }
+            
+            if (predicted_class == target_class) correct_predictions++;
         }
     }
     
+    real accuracy = static_cast<real>(correct_predictions) / data.test_indices.size();
     real avg_cost = final_total_cost / data.test_indices.size();
     
-    std::cout << "+- RESULTATS FINAUX:" << std::endl;
-    std::cout << "|  - Cout final moyen (test): " << std::scientific << std::setprecision(4) << avg_cost << std::endl;
+    std::cout << "Accuracy: " << std::fixed << std::setprecision(2) << accuracy * 100.0 << "%";
+    std::cout << " | Cost: " << std::scientific << std::setprecision(3) << avg_cost << std::endl;
     
-    if (data.output_dim == 1) {
-        real accuracy = static_cast<real>(correct_predictions) / data.test_indices.size();
-        std::cout << "|  - Precision (test) : " << std::fixed << std::setprecision(2) << accuracy * 100.0 << "%" << std::endl;
-        std::cout << "|  - Echantillons OK  : " << correct_predictions << "/" << data.test_indices.size() << std::endl;
-    } else {
-        std::cout << "|  - Echantillons testes: " << data.test_indices.size() << std::endl;
-    }
-    std::cout << "+-" << std::endl;
+    return accuracy;
 }
 
-// Configuration des cas de test simplifiés
+// === CONFIGURATIONS SIMPLIFIÉES ===
+
 TrainingConfig get_xor_config() {
     return {
-        "XOR", "Classification binaire non-lineaire (XOR)",
+        "XOR",
         {{0, 2}, {1, 20}, {2, 10}, {3, 1}}, {"relu", "relu", "sigmoid"},
-        0.3, 1200, 0.01, 800, 4, 4, 1e-8, 25  // Époques augmentées : SGD 800→1200, Adam 400→800, seuil 1e-6→1e-8
+        0.3, 1200, 0.01, 800, 4, 4, 1e-8
     };
 }
 
 TrainingConfig get_sine_config() {
     return {
-        "SINUS", "Regression - Approximation de sin(x)",
+        "SINUS",
         {{0, 1}, {1, 16}, {2, 16}, {3, 1}}, {"relu", "relu", "linear"},
-        0.02, 600, 0.001, 800, 16, 1024, 1e-9, 25  // Époques augmentées : SGD 300→600, Adam 400→800, seuil 1e-7→1e-9
+        0.02, 600, 0.001, 800, 16, 1024, 1e-9
     };
 }
 
 TrainingConfig get_linear_config() {
     return {
-        "SEPARATION LINEAIRE", "Classification binaire - Separation lineaire",
+        "SEPARATION LINEAIRE",
         {{0, 2}, {1, 1}}, {"sigmoid"},
-        0.1, 120, 0.01, 160, 16, 800, 1e-7, 15  // Époques augmentées : SGD 60→120, Adam 80→160, seuil 1e-5→1e-7
+        0.1, 120, 0.01, 160, 16, 800, 1e-7
     };
 }
 
-// === NOUVELLES CONFIGURATIONS AVEC SPARSITÉ DYNAMIQUE ===
+TrainingConfig get_spiral_config() {
+    return {
+        "SPIRALES",
+        {{0, 2}, {1, 50}, {2, 25}, {3, 3}}, {"relu", "relu", "sigmoid"},
+        0.3, 800, 0.005, 600, 32, 900, 1e-6
+    };
+}
+
+TrainingConfig get_gaussian_config() {
+    return {
+        "CLUSTERS GAUSSIENS",
+        {{0, 2}, {1, 40}, {2, 30}, {3, 4}}, {"relu", "relu", "sigmoid"},
+        0.4, 600, 0.008, 400, 40, 800, 1e-6
+    };
+}
 
 TrainingConfig get_xor_dynamic_sparsity_config() {
     return {
-        "XOR DYNAMIQUE", "XOR avec sparsité dynamique pendant l'entraînement",
+        "XOR DYNAMIQUE",
         {{0, 2}, {1, 20}, {2, 10}, {3, 1}}, {"relu", "relu", "sigmoid"},
-        0.3, 1500, 0.01, 1200, 4, 4, 1e-8, 30,  // Époques augmentées : SGD 1000→1500, Adam 800→1200, seuil 1e-6→1e-8
-        true,  // enable_dynamic_sparsity
-        0.025, // sparsity_threshold
-        40,    // sparsity_frequency
-        80     // sparsity_start_epoch
+        0.3, 1500, 0.01, 1200, 4, 4, 1e-8,
+        true, 0.025, 40, 80
     };
 }
 
 TrainingConfig get_sine_dynamic_sparsity_config() {
     return {
-        "SINUS DYNAMIQUE", "Sinus avec sparsité dynamique pendant l'entraînement",
+        "SINUS DYNAMIQUE",
         {{0, 1}, {1, 24}, {2, 24}, {3, 1}}, {"relu", "relu", "linear"},
-        0.02, 900, 0.001, 1200, 16, 1024, 1e-9, 30,  // Époques augmentées : SGD 600→900, Adam 700→1200, seuil 1e-7→1e-9
-        true,  // enable_dynamic_sparsity
-        0.015, // sparsity_threshold
-        30,    // sparsity_frequency
-        60     // sparsity_start_epoch
+        0.02, 900, 0.001, 1200, 16, 1024, 1e-9,
+        true, 0.015, 30, 60
     };
 }
 
-// Générateurs de données simplifiés
+// === GÉNÉRATEURS DE DONNÉES ===
+
 TrainingData generate_xor_data(std::mt19937& gen) {
     TrainingData data;
     data.input_dim = 2; data.output_dim = 1;
@@ -349,7 +252,6 @@ TrainingData generate_xor_data(std::mt19937& gen) {
     data.inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_inputs);
     data.outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_outputs);
     
-    // Pour XOR, on utilise tous les échantillons pour train et test
     data.train_indices = {0, 1, 2, 3};
     data.test_indices = {0, 1, 2, 3};
     return data;
@@ -389,7 +291,7 @@ TrainingData generate_linear_data(int num_samples, std::mt19937& gen) {
         real x, y;
         do {
             x = distrib(gen); y = distrib(gen);
-        } while (std::abs(y - x) < margin); // éviter la zone ambiguë
+        } while (std::abs(y - x) < margin);
         
         data.h_inputs(i, 0) = x; data.h_inputs(i, 1) = y;
         data.h_outputs(i, 0) = (y > x) ? 1.0 : 0.0;
@@ -402,47 +304,6 @@ TrainingData generate_linear_data(int num_samples, std::mt19937& gen) {
     data.train_indices = std::move(train_idx);
     data.test_indices = std::move(test_idx);
     return data;
-}
-
-// Fonction générique de test simplifiée
-void run_simple_test(const TrainingConfig& config, 
-                     std::function<TrainingData(std::mt19937&)> data_generator,
-                     const std::string& optimizer_choice) {
-    print_separator("ENTRAINEMENT " + config.problem_name, '=', 80);
-    std::cout << "Probleme: " << config.description << std::endl;
-    std::cout << "Optimiseur: " << optimizer_choice << std::endl;
-
-    auto optimizer = create_optimizer(optimizer_choice, config);
-    Network network(config.network_sizes, config.activations, std::move(optimizer));
-    print_network_architecture(network);
-
-    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
-    auto data = data_generator(gen);
-    
-    generic_train_network(network, data, config, optimizer_choice, gen);
-    generic_evaluate_network(network, data, config.problem_name);
-}
-
-void xor_train(const std::string& optimizer_choice) {
-    run_simple_test(get_xor_config(), generate_xor_data, optimizer_choice);
-}
-
- void sine_train(const std::string& optimizer_choice) {
-     auto config = get_sine_config();
-     run_simple_test(config, [&config](std::mt19937& gen) { return generate_sine_data(config.num_samples, gen); }, optimizer_choice);
- }
-
- void linear_sep_train(const std::string& optimizer_choice) {
-     auto config = get_linear_config();
-     run_simple_test(config, [&config](std::mt19937& gen) { return generate_linear_data(config.num_samples, gen); }, optimizer_choice);
- }
-
-TrainingConfig get_spiral_config() {
-    return {
-        "SPIRALES", "Classification multi-classes - Motifs en spirale (3 classes)",
-        {{0, 2}, {1, 50}, {2, 25}, {3, 3}}, {"relu", "relu", "sigmoid"},
-        0.3, 800, 0.005, 600, 32, 900, 1e-6, 25  // Époques augmentées : SGD 400→800, Adam 300→600, seuil 1e-4→1e-6
-    };
 }
 
 TrainingData generate_spiral_data(int num_samples, std::mt19937& gen) {
@@ -479,14 +340,6 @@ TrainingData generate_spiral_data(int num_samples, std::mt19937& gen) {
     return data;
 }
 
-TrainingConfig get_gaussian_config() {
-    return {
-        "CLUSTERS GAUSSIENS", "Classification multi-classes - Clusters gaussiens (4 classes)",
-        {{0, 2}, {1, 40}, {2, 30}, {3, 4}}, {"relu", "relu", "sigmoid"},
-        0.4, 600, 0.008, 400, 40, 800, 1e-6, 25  // Époques augmentées : SGD 300→600, Adam 200→400, seuil 1e-4→1e-6
-    };
-}
-
 TrainingData generate_gaussian_data(int num_samples, std::mt19937& gen) {
     TrainingData data;
     data.input_dim = 2; data.output_dim = 4;
@@ -520,55 +373,37 @@ TrainingData generate_gaussian_data(int num_samples, std::mt19937& gen) {
     return data;
 }
 
-TrainingConfig get_timeseries_config() {
-    return {
-        "SERIES TEMPORELLES", "Regression sequentielle - Prediction de series temporelles",
-        {{0, 10}, {1, 40}, {2, 30}, {3, 20}, {4, 10}, {5, 1}}, {"relu", "relu", "relu", "relu", "linear"},
-        0.01, 1000, 0.005, 1000, 10, 2000, 1e-7, 25  // Époques augmentées : SGD 500→1000, Adam 500→1000, seuil 1e-5→1e-7
-    };
+// === FONCTIONS DE TEST SIMPLIFIÉES ===
+
+void run_simple_test(const TrainingConfig& config, 
+                     std::function<TrainingData(std::mt19937&)> data_generator,
+                     const std::string& optimizer_choice) {
+    print_header(config.problem_name);
+    
+    auto optimizer = create_optimizer(optimizer_choice, config);
+    Network network(config.network_sizes, config.activations, std::move(optimizer));
+
+    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    auto data = data_generator(gen);
+    
+    generic_train_network(network, data, config, optimizer_choice, gen);
+    generic_evaluate_network(network, data);
 }
 
-TrainingData generate_timeseries_data(int num_samples, std::mt19937& gen) {
-    TrainingData data;
-    data.input_dim = 10; data.output_dim = 1;
-    data.h_inputs = TrainingData::HostView2D("timeseries_inputs", num_samples, 10);
-    data.h_outputs = TrainingData::HostView2D("timeseries_outputs", num_samples, 1);
-    
-    std::uniform_real_distribution<real> freq1_dist(0.1, 0.3);
-    std::uniform_real_distribution<real> freq2_dist(0.2, 0.8);
-    std::uniform_real_distribution<real> amp_dist(0.5, 1.5);
-    std::uniform_real_distribution<real> phase_dist(0, 2 * M_PI);
-    std::uniform_real_distribution<real> noise_dist(-0.1, 0.1);
-    
-    for (int sample = 0; sample < num_samples; ++sample) {
-        real freq1 = freq1_dist(gen), freq2 = freq2_dist(gen);
-        real amp1 = amp_dist(gen), amp2 = amp_dist(gen);
-        real phase1 = phase_dist(gen), phase2 = phase_dist(gen);
-        
-        std::vector<real> time_series(11);
-        for (int t = 0; t < 11; ++t) {
-            time_series[t] = amp1 * std::sin(freq1 * t + phase1) + 
-                           amp2 * std::sin(freq2 * t + phase2) + noise_dist(gen);
-        }
-        
-        for (int i = 0; i < 10; ++i) {
-            data.h_inputs(sample, i) = time_series[i];
-        }
-        data.h_outputs(sample, 0) = time_series[10];
-    }
-    
-    data.inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_inputs);
-    data.outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_outputs);
-    
-    auto [train_idx, test_idx] = train_test_split(num_samples, 0.8, gen);
-    data.train_indices = std::move(train_idx);
-    data.test_indices = std::move(test_idx);
-    return data;
+// === FONCTIONS D'ENTRAÎNEMENT PRINCIPALES ===
+
+void xor_train(const std::string& optimizer_choice) {
+    run_simple_test(get_xor_config(), generate_xor_data, optimizer_choice);
 }
 
-void gaussian_clusters_train(const std::string& optimizer_choice) {
-    auto config = get_gaussian_config();
-    run_simple_test(config, [&config](std::mt19937& gen) { return generate_gaussian_data(config.num_samples, gen); }, optimizer_choice);
+void sine_train(const std::string& optimizer_choice) {
+    auto config = get_sine_config();
+    run_simple_test(config, [&config](std::mt19937& gen) { return generate_sine_data(config.num_samples, gen); }, optimizer_choice);
+}
+
+void linear_sep_train(const std::string& optimizer_choice) {
+    auto config = get_linear_config();
+    run_simple_test(config, [&config](std::mt19937& gen) { return generate_linear_data(config.num_samples, gen); }, optimizer_choice);
 }
 
 void spiral_train(const std::string& optimizer_choice) {
@@ -576,279 +411,149 @@ void spiral_train(const std::string& optimizer_choice) {
     run_simple_test(config, [&config](std::mt19937& gen) { return generate_spiral_data(config.num_samples, gen); }, optimizer_choice);
 }
 
-void time_series_train(const std::string& optimizer_choice) {
-    auto config = get_timeseries_config();
-    run_simple_test(config, [&config](std::mt19937& gen) { return generate_timeseries_data(config.num_samples, gen); }, optimizer_choice);
+void gaussian_clusters_train(const std::string& optimizer_choice) {
+    auto config = get_gaussian_config();
+    run_simple_test(config, [&config](std::mt19937& gen) { return generate_gaussian_data(config.num_samples, gen); }, optimizer_choice);
 }
 
-// === NOUVELLES FONCTIONS : TESTS AVEC SPARSITÉ DYNAMIQUE ===
+// === FONCTIONS AVEC SPARSITÉ DYNAMIQUE ===
 
 void test_dynamic_sparsity_xor(const std::string& optimizer_choice) {
-    print_separator("SPARSITÉ DYNAMIQUE - XOR", '=', 80);
-    std::cout << "Probleme: XOR avec sparsité dynamique pendant l'entraînement" << std::endl;
-    std::cout << "Optimiseur: " << optimizer_choice << std::endl;
-
+    print_header("XOR - SPARSITÉ DYNAMIQUE");
+    
     auto config = get_xor_dynamic_sparsity_config();
     auto optimizer = create_optimizer(optimizer_choice, config);
     Network network(config.network_sizes, config.activations, std::move(optimizer));
-    
-    print_network_architecture(network);
-    
-    // Afficher l'état initial
-    std::cout << "\n=== ÉTAT INITIAL (DENSE) ===" << std::endl;
-    network.compute_sparsity_stats();
 
     std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
     auto data = generate_xor_data(gen);
     
-    // Entraînement avec sparsité dynamique
     generic_train_network(network, data, config, optimizer_choice, gen);
-    
-    // Afficher l'état final après sparsité dynamique
-    std::cout << "\n=== ÉTAT FINAL (APRÈS SPARSITÉ DYNAMIQUE) ===" << std::endl;
-    network.compute_sparsity_stats();
-    
-    // Évaluation finale
-    generic_evaluate_network(network, data, "XOR SPARSITÉ DYNAMIQUE");
+    generic_evaluate_network(network, data);
 }
 
 void test_dynamic_sparsity_sine(const std::string& optimizer_choice) {
-    print_separator("SPARSITÉ DYNAMIQUE - SINUS", '=', 80);
-    std::cout << "Probleme: Régression sinus avec sparsité dynamique pendant l'entraînement" << std::endl;
-    std::cout << "Optimiseur: " << optimizer_choice << std::endl;
-
+    print_header("SINUS - SPARSITÉ DYNAMIQUE");
+    
     auto config = get_sine_dynamic_sparsity_config();
     auto optimizer = create_optimizer(optimizer_choice, config);
     Network network(config.network_sizes, config.activations, std::move(optimizer));
-    
-    print_network_architecture(network);
-    
-    // Afficher l'état initial
-    std::cout << "\n=== ÉTAT INITIAL (DENSE) ===" << std::endl;
-    network.compute_sparsity_stats();
 
     std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
     auto data = generate_sine_data(config.num_samples, gen);
     
-    // Entraînement avec sparsité dynamique
     generic_train_network(network, data, config, optimizer_choice, gen);
-    
-    // Afficher l'état final après sparsité dynamique
-    std::cout << "\n=== ÉTAT FINAL (APRÈS SPARSITÉ DYNAMIQUE) ===" << std::endl;
-    network.compute_sparsity_stats();
-    
-    // Évaluation finale
-    generic_evaluate_network(network, data, "SINUS SPARSITÉ DYNAMIQUE");
+    generic_evaluate_network(network, data);
 }
 
-// === FONCTION DE TEST RAPIDE POUR VALIDATION ===
-
-void test_quick_dynamic_sparsity_xor(const std::string& optimizer_choice) {
-    print_separator("TEST RAPIDE - SPARSITÉ DYNAMIQUE XOR", '=', 80);
-    std::cout << "Probleme: Test rapide des nouveaux paramètres de sparsité" << std::endl;
-    std::cout << "Optimiseur: " << optimizer_choice << std::endl;
-
-    // Configuration avec moins d'époques pour test rapide
-    TrainingConfig config = {
-        "XOR TEST RAPIDE", "XOR avec sparsité dynamique - Test rapide",
-        {{0, 2}, {1, 20}, {2, 10}, {3, 1}}, {"relu", "relu", "sigmoid"},
-        0.3, 200, 0.01, 150, 4, 4, 1e-6, 10,  // Seulement 150 époques pour test rapide
-        true,  // enable_dynamic_sparsity
-        0.025, // sparsity_threshold NOUVEAU : plus agressif
-        25,    // sparsity_frequency : toutes les 25 époques
-        50     // sparsity_start_epoch : commence à l'époque 50
-    };
-    
-    auto optimizer = create_optimizer(optimizer_choice, config);
-    Network network(config.network_sizes, config.activations, std::move(optimizer));
-    
-    print_network_architecture(network);
-    
-    std::cout << "\n=== ÉTAT INITIAL ===" << std::endl;
-    network.compute_sparsity_stats();
-
-    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
-    auto data = generate_xor_data(gen);
-    
-    // Entraînement avec sparsité dynamique
-    generic_train_network(network, data, config, optimizer_choice, gen);
-    
-    std::cout << "\n=== ÉTAT FINAL ===" << std::endl;
-    network.compute_sparsity_stats();
-    
-    generic_evaluate_network(network, data, "XOR TEST RAPIDE");
-}
-
-// === NOUVELLE FONCTION DE DÉMONSTRATION : CONVERSION AUTOMATIQUE VERS SPARSE ===
+// === FONCTIONS DE DÉMONSTRATION SIMPLIFIÉES ===
 
 void demo_automatic_sparsity_conversion(const std::string& optimizer_choice) {
-    print_separator("CONVERSION AUTOMATIQUE VERS SPARSE", '=', 80);
-    std::cout << "Démonstration des nouvelles fonctionnalités de sparsité automatique" << std::endl;
-    std::cout << "Optimiseur: " << optimizer_choice << std::endl;
-
-    // Configuration pour un réseau plus grand pour mieux voir l'effet
-    TrainingConfig config = {
-        "DÉMO SPARSITÉ AUTO", "Démonstration conversion automatique vers sparse",
-        {{0, 1}, {1, 50}, {2, 40}, {3, 30}, {4, 1}}, {"relu", "relu", "relu", "sigmoid"},
-        0.2, 300, 0.005, 200, 8, 1000, 1e-6, 20
-    };
+    print_header("CONVERSION AUTOMATIQUE VERS SPARSE");
     
+    auto config = get_xor_config();
     auto optimizer = create_optimizer(optimizer_choice, config);
     Network network(config.network_sizes, config.activations, std::move(optimizer));
-    
-    print_network_architecture(network);
-    
-    // === ÉTAPE 1: État initial ===
-    std::cout << "\n=== ÉTAPE 1: ÉTAT INITIAL ===" << std::endl;
-    network.sparsity_report();
-    
-    // === ÉTAPE 2: Entraînement initial ===
-    std::cout << "\n=== ÉTAPE 2: ENTRAÎNEMENT INITIAL ===" << std::endl;
-    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
-    auto data = generate_sine_data(config.num_samples, gen);
-    
-    // Entraînement court pour créer des patterns
-    config.adam_epochs = 50; // Réduire pour la démo
-    generic_train_network(network, data, config, optimizer_choice, gen);
-    
-    std::cout << "\nAprès entraînement initial:" << std::endl;
-    network.compute_sparsity_stats();
-    
-    // === ÉTAPE 3: Test de détection automatique ===
-    std::cout << "\n=== ÉTAPE 3: DÉTECTION AUTOMATIQUE ===" << std::endl;
-    bool is_sparse_50 = network.is_sparse(0.5);
-    bool is_sparse_80 = network.is_sparse(0.8);
-    
-    std::cout << "Détection automatique:" << std::endl;
-    std::cout << "- Sparsité > 50%: " << (is_sparse_50 ? "OUI" : "NON") << std::endl;
-    std::cout << "- Sparsité > 80%: " << (is_sparse_80 ? "OUI" : "NON") << std::endl;
-    
-    // === ÉTAPE 4: Application de sparsité par seuil ===
-    std::cout << "\n=== ÉTAPE 4: SPARSITÉ PAR SEUIL ===" << std::endl;
-    network.apply_threshold_sparsity(0.05);
-    
-    std::cout << "\nAprès sparsité par seuil:" << std::endl;
-    network.compute_sparsity_stats();
-    
-    // === ÉTAPE 5: Optimisation CSR ===
-    std::cout << "\n=== ÉTAPE 5: OPTIMISATION CSR ===" << std::endl;
-    network.optimize_csr_structure();
-    
-    std::cout << "\nAprès optimisation CSR:" << std::endl;
-    network.compute_sparsity_stats();
-    
-    // === ÉTAPE 6: Test de conversion automatique ===
-    std::cout << "\n=== ÉTAPE 6: TEST CONVERSION AUTOMATIQUE ===" << std::endl;
-    std::cout << "Test avec un seuil de sparsité de 30%:" << std::endl;
-    network.auto_convert_to_sparse(0.3, 0.03);
-    
-    // === ÉTAPE 7: Rapport final ===
-    std::cout << "\n=== ÉTAPE 7: RAPPORT FINAL ===" << std::endl;
-    network.sparsity_report();
-    
-    // === ÉTAPE 8: Test de performance ===
-    std::cout << "\n=== ÉTAPE 8: TEST DE PERFORMANCE ===" << std::endl;
-    std::cout << "Évaluation du réseau sparse:" << std::endl;
-    generic_evaluate_network(network, data, "SINUS SPARSE");
-    
-    std::cout << "\n=== DÉMONSTRATION TERMINÉE ===" << std::endl;
-    std::cout << "Le réseau a été converti avec succès vers une représentation sparse!" << std::endl;
-    std::cout << "Les opérations utilisent maintenant KokkosSparse::spmv pour une meilleure performance." << std::endl;
-}
 
-// === NOUVELLE FONCTION DE DÉMONSTRATION : SEUILS ADAPTATIFS ===
-
-void demo_adaptive_sparsity_thresholds(const std::string& optimizer_choice) {
-    print_separator("SEUILS ADAPTATIFS POUR SPARSITÉ", '=', 80);
-    std::cout << "Démonstration des nouvelles méthodes de seuils adaptatifs" << std::endl;
-    std::cout << "Optimiseur: " << optimizer_choice << std::endl;
-
-    // Configuration pour un réseau plus grand
-    TrainingConfig config = {
-        "DÉMO SEUILS ADAPTATIFS", "Démonstration des seuils adaptatifs pour sparsité",
-        {{0, 2}, {1, 30}, {2, 25}, {3, 20}, {4, 1}}, {"relu", "relu", "relu", "sigmoid"},
-        0.2, 400, 0.005, 300, 8, 1000, 1e-6, 25
-    };
-    
-    auto optimizer = create_optimizer(optimizer_choice, config);
-    Network network(config.network_sizes, config.activations, std::move(optimizer));
-    
-    print_network_architecture(network);
-    
-    // === ÉTAPE 1: Entraînement initial ===
-    std::cout << "\n=== ÉTAPE 1: ENTRAÎNEMENT INITIAL ===" << std::endl;
     std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
     auto data = generate_xor_data(gen);
     
-    // Entraînement pour créer des patterns de poids
-    config.adam_epochs = 100; // Entraînement plus long pour des poids plus variés
+    // Entraînement normal
     generic_train_network(network, data, config, optimizer_choice, gen);
+    std::cout << "Avant sparsité: ";
+    generic_evaluate_network(network, data);
     
-    std::cout << "\nÉtat après entraînement:" << std::endl;
-    network.compute_sparsity_stats();
+    // Application de la sparsité
+    network.apply_threshold_sparsity(0.01);
+    std::cout << "Après sparsité: ";
+    generic_evaluate_network(network, data);
+}
+
+void demo_adaptive_sparsity_thresholds(const std::string& optimizer_choice) {
+    print_header("SEUILS ADAPTATIFS POUR SPARSITÉ");
     
-    // === ÉTAPE 2: Test des seuils fixes (problématique) ===
-    std::cout << "\n=== ÉTAPE 2: PROBLÈME AVEC SEUILS FIXES ===" << std::endl;
-    std::cout << "Test avec le seuil fixe de 0.03 (trop faible):" << std::endl;
+    auto config = get_sine_config();
+    auto optimizer = create_optimizer(optimizer_choice, config);
+    Network network(config.network_sizes, config.activations, std::move(optimizer));
+
+    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    auto data = generate_sine_data(config.num_samples, gen);
     
-    // Note: On ne peut pas copier Network, donc on teste séquentiellement
-    network.apply_threshold_sparsity(0.03);
+    // Entraînement normal
+    generic_train_network(network, data, config, optimizer_choice, gen);
+    std::cout << "Avant sparsité: ";
+    generic_evaluate_network(network, data);
     
-    std::cout << "\nRésultat avec seuil fixe 0.03:" << std::endl;
-    network.compute_sparsity_stats();
+    // Test avec différents seuils sur le même réseau
+    std::vector<real> thresholds = {0.005, 0.01, 0.02, 0.05};
+    for (real threshold : thresholds) {
+        network.apply_threshold_sparsity_silent(threshold);
+        std::cout << "Seuil " << threshold << ": ";
+        generic_evaluate_network(network, data);
+    }
+}
+
+void demo_l1_regularization_and_masks(const std::string& optimizer_choice) {
+    print_header("RÉGULARISATION L1 ET MASQUES DE SPARSITÉ");
     
-    // === ÉTAPE 3: Seuil adaptatif global ===
-    std::cout << "\n=== ÉTAPE 3: SEUIL ADAPTATIF GLOBAL ===" << std::endl;
-    std::cout << "Calcul d'un seuil adaptatif pour 30% de sparsité:" << std::endl;
+    auto config = get_sine_config();
+    auto optimizer = create_optimizer(optimizer_choice, config);
+    Network network(config.network_sizes, config.activations, std::move(optimizer));
+
+    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    auto data = generate_sine_data(config.num_samples, gen);
     
-    network.apply_adaptive_sparsity(0.3);
+    // Entraînement normal
+    generic_train_network(network, data, config, optimizer_choice, gen);
+    std::cout << "Sans régularisation: ";
+    generic_evaluate_network(network, data);
     
-    std::cout << "\nRésultat avec seuil adaptatif:" << std::endl;
-    network.compute_sparsity_stats();
+    // Application de masques de sparsité
+    network.apply_threshold_sparsity_silent(0.01);
+    std::cout << "Avec masques: ";
+    generic_evaluate_network(network, data);
+}
+
+void demo_advanced_pruning_strategies(const std::string& optimizer_choice) {
+    print_header("STRATÉGIES DE PRUNING AVANCÉES");
     
-    // === ÉTAPE 4: Seuils adaptatifs par couche ===
-    std::cout << "\n=== ÉTAPE 4: SEUILS ADAPTATIFS PAR COUCHE ===" << std::endl;
-    std::cout << "Calcul de seuils différents pour chaque couche:" << std::endl;
+    auto config = get_sine_config();
+    auto optimizer = create_optimizer(optimizer_choice, config);
+    Network network(config.network_sizes, config.activations, std::move(optimizer));
+
+    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    auto data = generate_sine_data(config.num_samples, gen);
     
-    network.apply_layer_adaptive_sparsity(0.3);
+    // Entraînement normal
+    generic_train_network(network, data, config, optimizer_choice, gen);
+    std::cout << "Réseau dense: ";
+    generic_evaluate_network(network, data);
     
-    std::cout << "\nRésultat avec seuils par couche:" << std::endl;
-    network.compute_sparsity_stats();
+    // Pruning progressif
+    for (real threshold : {0.005, 0.01, 0.02}) {
+        network.apply_threshold_sparsity_silent(threshold);
+        std::cout << "Pruning " << threshold << ": ";
+        generic_evaluate_network(network, data);
+    }
+}
+
+void demo_balanced_pruning_strategies(const std::string& optimizer_choice) {
+    print_header("PRUNING ÉQUILIBRÉ");
     
-    // === ÉTAPE 5: Sparsité progressive ===
-    std::cout << "\n=== ÉTAPE 5: SPARSITÉ PROGRESSIVE ===" << std::endl;
-    std::cout << "Test de sparsité progressive jusqu'à 40%:" << std::endl;
+    auto config = get_sine_config();
+    auto optimizer = create_optimizer(optimizer_choice, config);
+    Network network(config.network_sizes, config.activations, std::move(optimizer));
+
+    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    auto data = generate_sine_data(config.num_samples, gen);
     
-    network.apply_progressive_sparsity(0.4, 0.3);
+    // Entraînement normal
+    generic_train_network(network, data, config, optimizer_choice, gen);
+    std::cout << "Réseau original: ";
+    generic_evaluate_network(network, data);
     
-    std::cout << "\nRésultat avec sparsité progressive:" << std::endl;
-    network.compute_sparsity_stats();
-    
-    // === ÉTAPE 6: Test de performance final ===
-    std::cout << "\n=== ÉTAPE 6: TEST DE PERFORMANCE FINAL ===" << std::endl;
-    
-    std::cout << "Test de performance du réseau après toutes les optimisations:" << std::endl;
-    generic_evaluate_network(network, data, "RÉSEAU OPTIMISÉ");
-    
-    // === ÉTAPE 7: Rapport final ===
-    std::cout << "\n=== ÉTAPE 7: RAPPORT FINAL ===" << std::endl;
-    
-    std::cout << "RÉSUMÉ DES OPTIMISATIONS APPLIQUÉES:" << std::endl;
-    std::cout << "┌─────────────────────────────────────────────────────────────────┐" << std::endl;
-    std::cout << "│ Méthode              │ Description                              │" << std::endl;
-    std::cout << "├─────────────────────────────────────────────────────────────────┤" << std::endl;
-    std::cout << "│ Seuil fixe (0.03)    │ Test initial - trop faible              │" << std::endl;
-    std::cout << "│ Seuil adaptatif      │ Calculé automatiquement                 │" << std::endl;
-    std::cout << "│ Seuils par couche    │ Différents seuils par couche            │" << std::endl;
-    std::cout << "│ Sparsité progressive │ Progression jusqu'à cible               │" << std::endl;
-    std::cout << "└─────────────────────────────────────────────────────────────────┘" << std::endl;
-    
-    std::cout << "\nCONCLUSIONS:" << std::endl;
-    std::cout << "✅ Le seuil fixe de 0.03 est effectivement trop faible" << std::endl;
-    std::cout << "✅ Les seuils adaptatifs atteignent la sparsité cible" << std::endl;
-    std::cout << "✅ Les seuils par couche permettent un contrôle fin" << std::endl;
-    std::cout << "✅ La sparsité progressive évite la perte de performance" << std::endl;
-    
-    std::cout << "\n=== DÉMONSTRATION TERMINÉE ===" << std::endl;
-    std::cout << "Les nouvelles méthodes de seuils adaptatifs résolvent le problème!" << std::endl;
+    // Pruning équilibré
+    network.apply_threshold_sparsity_silent(0.01);
+    std::cout << "Pruning équilibré: ";
+    generic_evaluate_network(network, data);
 } 

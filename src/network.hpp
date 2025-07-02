@@ -8,6 +8,14 @@
 class Dataset {};
 class BatchHandler {};
 
+// Structure pour stocker les masques de sparsité
+struct SparsityMask {
+    Kokkos::View<bool*, Kokkos::DefaultExecutionSpace> mask;
+    int size;
+    
+    SparsityMask(int _size);
+};
+
 // --- Classe Network ---
 class Network {
 public:
@@ -63,6 +71,9 @@ public:
     // Applique la sparsité par seuil : met à zéro les poids |w| < threshold
     void apply_threshold_sparsity(real threshold);
     
+    // Version silencieuse pour l'entraînement (sans affichage)
+    void apply_threshold_sparsity_silent(real threshold);
+    
     // Calcule et affiche les statistiques de sparsité réelle
     void compute_sparsity_stats() const;
     
@@ -101,4 +112,53 @@ public:
     
     // Applique la sparsité avec seuils différents par couche
     void apply_layer_adaptive_sparsity(real target_sparsity = 0.3);
+    
+    // === NOUVELLES MÉTHODES POUR RÉGULARISATION ET MASQUES ===
+    
+    // Applique la régularisation L1 pendant l'entraînement
+    void apply_l1_regularization(real lambda);
+    
+    // Crée et applique des masques de sparsité permanents
+    void create_sparsity_masks(real threshold);
+    
+    // Applique les masques de sparsité (empêche la récupération)
+    void apply_sparsity_masks();
+    
+    // Vérifie si les masques sont actifs
+    bool has_sparsity_masks() const;
+    
+    // Supprime les masques de sparsité
+    void remove_sparsity_masks();
+    
+    // === NOUVELLES MÉTHODES POUR STRATÉGIES DE PRUNING AVANCÉES ===
+    
+    // Pruning structurel : supprime des neurones entiers
+    void apply_structural_pruning(real threshold);
+    
+    // Pruning progressif : augmente progressivement le seuil
+    void apply_progressive_pruning(real initial_threshold, real final_threshold, int epochs);
+    
+    // Pruning basé sur la sensibilité (gradient * poids)
+    void apply_sensitivity_pruning(real threshold);
+    
+    // Pruning par couche avec seuils différents
+    void apply_layer_specific_pruning(const std::vector<real>& thresholds);
+    
+    // Pruning adaptatif basé sur l'importance des connexions
+    void apply_importance_based_pruning(real sparsity_target);
+    
+    // Pruning avec réentraînement (fine-tuning)
+    void apply_pruning_with_retraining(real threshold, int retrain_epochs);
+    
+    // Pruning basé sur la variance des activations
+    void apply_activation_variance_pruning(real threshold);
+    
+    // Pruning avec masque de croissance (regrow)
+    void apply_pruning_with_regrowth(real prune_threshold, real regrow_threshold, int regrow_ratio);
+
+private:
+    // Membres privés pour les masques de sparsité
+    std::vector<SparsityMask> hidden_layer_masks;
+    SparsityMask output_layer_mask{0}; // Initialisation par défaut
+    bool masks_created = false;
 }; 
