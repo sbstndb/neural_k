@@ -136,6 +136,12 @@ struct TrainingConfig {
     int num_samples;
     real convergence_threshold;
     int progress_frequency;
+    
+    // === NOUVEAUX PARAMETRES POUR SPARSITÉ DYNAMIQUE ===
+    bool enable_dynamic_sparsity = false;     // Activer la sparsité dynamique
+    real sparsity_threshold = 0.01;           // Seuil de sparsité
+    int sparsity_frequency = 50;              // Fréquence d'application (en époques)
+    int sparsity_start_epoch = 100;           // Époque de début de la sparsité
 };
 
 struct TrainingData {
@@ -521,4 +527,72 @@ void spiral_train(const std::string& optimizer_choice) {
 void time_series_train(const std::string& optimizer_choice) {
     auto config = get_timeseries_config();
     run_simple_test(config, [&config](std::mt19937& gen) { return generate_timeseries_data(config.num_samples, gen); }, optimizer_choice);
+}
+
+// === NOUVELLE FONCTION : TEST AVEC SPARSITÉ ===
+
+void test_sparsity_xor(const std::string& optimizer_choice, real sparsity_threshold) {
+    print_separator("TEST DE SPARSITÉ - XOR", '=', 80);
+    std::cout << "Probleme: XOR avec application de sparsité post-entraînement" << std::endl;
+    std::cout << "Optimiseur: " << optimizer_choice << std::endl;
+    std::cout << "Seuil de sparsité: " << sparsity_threshold << std::endl;
+
+    auto config = get_xor_config();
+    auto optimizer = create_optimizer(optimizer_choice, config);
+    Network network(config.network_sizes, config.activations, std::move(optimizer));
+    
+    print_network_architecture(network);
+    
+    // Afficher l'état initial (pas de sparsité)
+    network.compute_sparsity_stats();
+
+    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    auto data = generate_xor_data(gen);
+    
+    // Entraînement normal
+    generic_train_network(network, data, config, optimizer_choice, gen);
+    generic_evaluate_network(network, data, "XOR AVANT SPARSITÉ");
+    
+    // Appliquer la sparsité
+    network.apply_threshold_sparsity(sparsity_threshold);
+    
+    // Vérifier l'état après sparsité
+    network.compute_sparsity_stats();
+    
+    // Tester les performances après sparsité
+    print_section_header("ÉVALUATION APRÈS SPARSITÉ", '=', 70);
+    generic_evaluate_network(network, data, "XOR APRÈS SPARSITÉ");
+}
+
+void test_sparsity_sine(const std::string& optimizer_choice, real sparsity_threshold) {
+    print_separator("TEST DE SPARSITÉ - SINUS", '=', 80);
+    std::cout << "Probleme: Régression sinus avec application de sparsité post-entraînement" << std::endl;
+    std::cout << "Optimiseur: " << optimizer_choice << std::endl;
+    std::cout << "Seuil de sparsité: " << sparsity_threshold << std::endl;
+
+    auto config = get_sine_config();
+    auto optimizer = create_optimizer(optimizer_choice, config);
+    Network network(config.network_sizes, config.activations, std::move(optimizer));
+    
+    print_network_architecture(network);
+    
+    // Afficher l'état initial (pas de sparsité)
+    network.compute_sparsity_stats();
+
+    std::mt19937 gen(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    auto data = generate_sine_data(config.num_samples, gen);
+    
+    // Entraînement normal
+    generic_train_network(network, data, config, optimizer_choice, gen);
+    generic_evaluate_network(network, data, "SINUS AVANT SPARSITÉ");
+    
+    // Appliquer la sparsité
+    network.apply_threshold_sparsity(sparsity_threshold);
+    
+    // Vérifier l'état après sparsité
+    network.compute_sparsity_stats();
+    
+    // Tester les performances après sparsité
+    print_section_header("ÉVALUATION APRÈS SPARSITÉ", '=', 70);
+    generic_evaluate_network(network, data, "SINUS APRÈS SPARSITÉ");
 } 

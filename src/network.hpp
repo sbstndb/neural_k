@@ -57,4 +57,12 @@ public:
     Network(const Network&) = delete;
     Network& operator=(const Network&) = delete;
     virtual ~Network() = default;
+    
+    // === NOUVELLES METHODES POUR LA SPARSITÉ ===
+    
+    // Applique la sparsité par seuil : met à zéro les poids |w| < threshold
+    void apply_threshold_sparsity(real threshold);
+    
+    // Calcule et affiche les statistiques de sparsité réelle
+    void compute_sparsity_stats() const;
 }; 

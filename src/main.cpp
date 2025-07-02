@@ -59,6 +59,14 @@ int main(int argc, char* argv[]) {
             print_demo_separator(6, "SERIES TEMPORELLES");
             time_series_train("adam");
 
+            // Démonstration 7: NOUVELLE - Test de sparsité
+            print_demo_separator(7, "SPARSITÉ POST-ENTRAÎNEMENT");
+            test_sparsity_xor("adam", 0.01); // Seuil de 1%
+
+            // Démonstration 8: NOUVELLE - Test de sparsité sur sinus
+            print_demo_separator(8, "SPARSITÉ SINUS - RÉGRESSION");
+            test_sparsity_sine("adam", 0.005); // Seuil plus fin pour régression
+
         } catch (const std::exception& e) {
             std::cerr << "\nERREUR CRITIQUE:" << std::endl;
             std::cerr << "   " << e.what() << std::endl;
