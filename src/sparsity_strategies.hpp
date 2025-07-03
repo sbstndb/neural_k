@@ -58,4 +58,32 @@ public:
     std::string name() const override { return "LayerSpecificPruning"; }
 private:
     std::vector<real> thresholds_;
+};
+
+class AdaptiveSparsityStrategy : public ISparsityStrategy {
+public:
+    explicit AdaptiveSparsityStrategy(real target_sparsity);
+    void apply(Network& net) override;
+    std::string name() const override { return "AdaptiveSparsity"; }
+private:
+    real target_sparsity_;
+};
+
+class ProgressiveSparsityStrategy : public ISparsityStrategy {
+public:
+    ProgressiveSparsityStrategy(real target_sparsity, real max_threshold);
+    void apply(Network& net) override;
+    std::string name() const override { return "ProgressiveSparsity"; }
+private:
+    real target_sparsity_;
+    real max_threshold_;
+};
+
+class LayerAdaptiveSparsityStrategy : public ISparsityStrategy {
+public:
+    explicit LayerAdaptiveSparsityStrategy(real target_sparsity);
+    void apply(Network& net) override;
+    std::string name() const override { return "LayerAdaptiveSparsity"; }
+private:
+    real target_sparsity_;
 }; 

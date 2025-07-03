@@ -549,180 +549,18 @@ real Network::compute_adaptive_threshold(real target_sparsity) const {
 }
 
 void Network::apply_adaptive_sparsity(real target_sparsity) {
-    real threshold = compute_adaptive_threshold(target_sparsity);
-    std::cout << "\nApplication du seuil adaptatif: " << std::fixed << std::setprecision(6) 
-              << threshold << std::endl;
-    apply_threshold_sparsity(threshold);
+    AdaptiveSparsityStrategy strat(target_sparsity);
+    strat.apply(*this);
 }
 
 void Network::apply_progressive_sparsity(real target_sparsity, real max_threshold) {
-    std::cout << "\n=== SPARSITÉ PROGRESSIVE ===" << std::endl;
-    std::cout << "Sparsité cible: " << std::fixed << std::setprecision(1) 
-              << (target_sparsity * 100.0) << "%" << std::endl;
-    std::cout << "Seuil maximum: " << std::fixed << std::setprecision(3) << max_threshold << std::endl;
-    
-    std::vector<real> thresholds = {0.01, 0.02, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50};
-    
-    for (real threshold : thresholds) {
-        if (threshold > max_threshold) break;
-        
-        std::cout << "\n--- Test avec seuil " << std::fixed << std::setprecision(3) 
-                  << threshold << " ---" << std::endl;
-        
-        // Tester le seuil sur une copie temporaire
-        // Note: On ne peut pas copier Network, donc on teste directement
-        std::cout << "Test avec seuil " << std::fixed << std::setprecision(3) 
-                  << threshold << "..." << std::endl;
-        
-        // Appliquer temporairement et vérifier
-        apply_threshold_sparsity(threshold);
-        
-        // Vérifier la sparsité obtenue
-        if (is_sparse(target_sparsity)) {
-            std::cout << "✓ Sparsité cible atteinte avec seuil " << threshold << std::endl;
-            return;
-        } else {
-            std::cout << "✗ Sparsité insuffisante, essai suivant..." << std::endl;
-            // Note: On ne peut pas annuler facilement, donc on continue
-        }
-    }
-    
-    std::cout << "⚠️  Impossible d'atteindre la sparsité cible avec les seuils testés" << std::endl;
-    std::cout << "Application du seuil maximum: " << max_threshold << std::endl;
-    apply_threshold_sparsity(max_threshold);
-}
-
-std::vector<real> Network::compute_layer_adaptive_thresholds(real target_sparsity) const {
-    std::cout << "\n=== CALCUL DES SEUILS ADAPTATIFS PAR COUCHE ===" << std::endl;
-    std::vector<real> thresholds;
-    
-    // Couches cachées
-    for (size_t i = 0; i < hidden_layers.size(); ++i) {
-        const auto& layer = hidden_layers[i];
-        if (layer.input_size > 0) {
-            std::vector<real> layer_weights;
-            auto w_vals = layer.weights.values;
-            int nnz = w_vals.extent_int(0);
-            
-            auto h_weights = Kokkos::create_mirror_view(w_vals);
-            Kokkos::deep_copy(h_weights, w_vals);
-            Kokkos::fence();
-            
-            for (int k = 0; k < nnz; ++k) {
-                if (h_weights(k) != 0.0) {
-                    layer_weights.push_back(Kokkos::abs(h_weights(k)));
-                }
-            }
-            
-            if (!layer_weights.empty()) {
-                std::sort(layer_weights.begin(), layer_weights.end());
-                size_t index = static_cast<size_t>(target_sparsity * layer_weights.size());
-                if (index >= layer_weights.size()) index = layer_weights.size() - 1;
-                
-                real threshold = layer_weights[index];
-                thresholds.push_back(threshold);
-                
-                std::cout << "Couche cachée " << (i+1) << ": seuil = " 
-                          << std::fixed << std::setprecision(6) << threshold << std::endl;
-            } else {
-                thresholds.push_back(0.0);
-                std::cout << "Couche cachée " << (i+1) << ": aucun poids non-nul" << std::endl;
-            }
-        }
-    }
-    
-    // Couche de sortie
-    if (output_layer.input_size > 0) {
-        std::vector<real> layer_weights;
-        auto w_vals = output_layer.weights.values;
-        int nnz = w_vals.extent_int(0);
-        
-        auto h_weights = Kokkos::create_mirror_view(w_vals);
-        Kokkos::deep_copy(h_weights, w_vals);
-        Kokkos::fence();
-        
-        for (int k = 0; k < nnz; ++k) {
-            if (h_weights(k) != 0.0) {
-                layer_weights.push_back(Kokkos::abs(h_weights(k)));
-            }
-        }
-        
-        if (!layer_weights.empty()) {
-            std::sort(layer_weights.begin(), layer_weights.end());
-            size_t index = static_cast<size_t>(target_sparsity * layer_weights.size());
-            if (index >= layer_weights.size()) index = layer_weights.size() - 1;
-            
-            real threshold = layer_weights[index];
-            thresholds.push_back(threshold);
-            
-            std::cout << "Couche sortie: seuil = " << std::fixed << std::setprecision(6) 
-                      << threshold << std::endl;
-        } else {
-            thresholds.push_back(0.0);
-            std::cout << "Couche sortie: aucun poids non-nul" << std::endl;
-        }
-    }
-    
-    return thresholds;
+    ProgressiveSparsityStrategy strat(target_sparsity, max_threshold);
+    strat.apply(*this);
 }
 
 void Network::apply_layer_adaptive_sparsity(real target_sparsity) {
-    std::vector<real> thresholds = compute_layer_adaptive_thresholds(target_sparsity);
-    
-    std::cout << "\n=== APPLICATION DES SEUILS PAR COUCHE ===" << std::endl;
-    
-    // Appliquer aux couches cachées
-    for (size_t i = 0; i < hidden_layers.size() && i < thresholds.size(); ++i) {
-        auto& layer = hidden_layers[i];
-        if (layer.input_size > 0) {
-            real threshold = thresholds[i];
-            std::cout << "Couche cachée " << (i+1) << ": seuil = " 
-                      << std::fixed << std::setprecision(6) << threshold << std::endl;
-            
-            auto w_vals = layer.weights.values;
-            int nnz = w_vals.extent_int(0);
-            
-            int layer_weights_zeroed = 0;
-            Kokkos::parallel_reduce("apply_layer_threshold_sparse", nnz, 
-                KOKKOS_LAMBDA(const int k, int& local_count) {
-                    if (Kokkos::abs(w_vals(k)) < threshold) {
-                        w_vals(k) = 0.0;
-                        local_count++;
-                    }
-                }, layer_weights_zeroed);
-            
-            std::cout << "  → " << layer_weights_zeroed << "/" << nnz 
-                      << " poids supprimés (" 
-                      << std::fixed << std::setprecision(1) 
-                      << (100.0 * layer_weights_zeroed / nnz) << "%)" << std::endl;
-        }
-    }
-    
-    // Appliquer à la couche de sortie
-    if (output_layer.input_size > 0 && thresholds.size() > hidden_layers.size()) {
-        real threshold = thresholds[hidden_layers.size()];
-        std::cout << "Couche sortie: seuil = " << std::fixed << std::setprecision(6) 
-                  << threshold << std::endl;
-        
-        auto w_vals = output_layer.weights.values;
-        int nnz = w_vals.extent_int(0);
-        
-        int layer_weights_zeroed = 0;
-        Kokkos::parallel_reduce("apply_layer_threshold_output_sparse", nnz, 
-            KOKKOS_LAMBDA(const int k, int& local_count) {
-                if (Kokkos::abs(w_vals(k)) < threshold) {
-                    w_vals(k) = 0.0;
-                    local_count++;
-                }
-            }, layer_weights_zeroed);
-        
-        std::cout << "  → " << layer_weights_zeroed << "/" << nnz 
-                  << " poids supprimés (" 
-                  << std::fixed << std::setprecision(1) 
-                  << (100.0 * layer_weights_zeroed / nnz) << "%)" << std::endl;
-    }
-    
-    std::cout << "Application terminée!" << std::endl;
+    LayerAdaptiveSparsityStrategy strat(target_sparsity);
+    strat.apply(*this);
 }
 
 // === NOUVELLES MÉTHODES POUR RÉGULARISATION ET MASQUES ===
@@ -973,6 +811,37 @@ void Network::apply_sparsity_strategies() {
     for (auto& strat : sparsity_strategies) {
         if (strat) strat->apply(*this);
     }
+}
+
+std::vector<real> Network::compute_layer_adaptive_thresholds(real target_sparsity) const {
+    std::vector<real> thresholds;
+    auto compute_threshold_for_weights = [&](const auto& w_vals)->real {
+        int nnz = w_vals.extent_int(0);
+        if (nnz == 0) return 0.0;
+        std::vector<real> values(nnz);
+        auto h_weights = Kokkos::create_mirror_view(w_vals);
+        Kokkos::deep_copy(h_weights, w_vals);
+        Kokkos::fence();
+        for (int k = 0; k < nnz; ++k) {
+            values[k] = Kokkos::abs(h_weights(k));
+        }
+        std::sort(values.begin(), values.end());
+        size_t idx = static_cast<size_t>(target_sparsity * values.size());
+        if (idx >= values.size()) idx = values.size() - 1;
+        return values[idx];
+    };
+
+    // Hidden layers
+    for (const auto& layer : hidden_layers) {
+        if (layer.input_size > 0) {
+            thresholds.push_back(compute_threshold_for_weights(layer.weights.values));
+        }
+    }
+    // Output layer
+    if (output_layer.input_size > 0) {
+        thresholds.push_back(compute_threshold_for_weights(output_layer.weights.values));
+    }
+    return thresholds;
 }
 
 Network::~Network() = default; 

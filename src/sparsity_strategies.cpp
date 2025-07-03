@@ -254,4 +254,51 @@ void LayerSpecificPruningStrategy::apply(Network& net) {
 
     std::cout << "Pruning spécifique par couche terminé!" << std::endl;
     std::cout << "=====================================\n" << std::endl;
+}
+
+// === AdaptiveSparsityStrategy ===
+AdaptiveSparsityStrategy::AdaptiveSparsityStrategy(real target_sparsity) : target_sparsity_(target_sparsity) {}
+
+void AdaptiveSparsityStrategy::apply(Network& net) {
+    real thr = net.compute_adaptive_threshold(target_sparsity_);
+    std::cout << "\n=== SPARSITÉ ADAPTATIVE ===" << std::endl;
+    std::cout << "Seuil adaptatif calculé: " << thr << std::endl;
+    ThresholdSparsityStrategy(thr).apply(net);
+    std::cout << "Sparsité adaptative appliquée!" << std::endl;
+    std::cout << "===========================\n" << std::endl;
+}
+
+// === ProgressiveSparsityStrategy ===
+ProgressiveSparsityStrategy::ProgressiveSparsityStrategy(real target_sparsity, real max_threshold)
+    : target_sparsity_(target_sparsity), max_threshold_(max_threshold) {}
+
+void ProgressiveSparsityStrategy::apply(Network& net) {
+    std::cout << "\n=== SPARSITÉ PROGRESSIVE ===" << std::endl;
+    real thr = 0.0;
+    const int steps = 10;
+    for (int i = 0; i < steps; ++i) {
+        thr = (max_threshold_ / steps) * (i + 1);
+        ThresholdSparsityStrategy(thr).apply(net);
+        if (net.is_sparse(target_sparsity_)) {
+            std::cout << "Cible atteinte à la step " << i+1 << " avec seuil " << thr << std::endl;
+            break;
+        }
+    }
+    std::cout << "Sparsité progressive terminée!" << std::endl;
+    std::cout << "===========================\n" << std::endl;
+}
+
+// === LayerAdaptiveSparsityStrategy ===
+LayerAdaptiveSparsityStrategy::LayerAdaptiveSparsityStrategy(real target_sparsity) : target_sparsity_(target_sparsity) {}
+
+void LayerAdaptiveSparsityStrategy::apply(Network& net) {
+    std::vector<real> thresholds = net.compute_layer_adaptive_thresholds(target_sparsity_);
+    std::cout << "\n=== SPARSITÉ ADAPTATIVE PAR COUCHE ===" << std::endl;
+    for (size_t i = 0; i < thresholds.size(); ++i) {
+        std::cout << "  Couche " << i+1 << " seuil: " << thresholds[i] << std::endl;
+    }
+    LayerSpecificPruningStrategy strat(thresholds);
+    strat.apply(net);
+    std::cout << "Sparsité adaptative par couche appliquée!" << std::endl;
+    std::cout << "=======================================\n" << std::endl;
 } 
