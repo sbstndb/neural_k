@@ -2,6 +2,15 @@
  Here is a simple Neural Network project. 
  The aim of this project is to have a first look at the Kokkos library and AI science.
 
+Neural K est un projet de réseau de neurones minimaliste. Son objectif est d'offrir une première prise en main de la bibliothèque Kokkos ainsi que des bases de l'IA. Les sections suivantes expliquent comment le compiler, l'exécuter et l'étendre en fonction de vos besoins.
+
+## Fonctionnalités clés
+
+- API C++ moderne et épurée reposant sur Kokkos.
+- Support initial des matrices creuses via KokkosSparse.
+- Optimiseurs intégrés : SGD et Adam.
+- Exemples complets d'entraînement dans `doc/examples.md`.
+
  From the [Kokkos](https://github.com/kokkos) github repo : 
 > The Kokkos C++ Performance Portability Ecosystem is a production level solution for writing modern C++ applications in a hardware agnostic way.
 Thanks to Kokkos, you can compile this code for multiple backends like OpenMP, CUDA, HIP.
