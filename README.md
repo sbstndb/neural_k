@@ -1,15 +1,76 @@
-# Introduction
- Here is a simple Neural Network project. 
- The aim of this project is to have a first look at the Kokkos library and AI science.
+# Neural K - Réseau de Neurones avec Kokkos
 
-Neural K est un projet de réseau de neurones minimaliste. Son objectif est d'offrir une première prise en main de la bibliothèque Kokkos ainsi que des bases de l'IA. Les sections suivantes expliquent comment le compiler, l'exécuter et l'étendre en fonction de vos besoins.
+Neural K est un projet de réseau de neurones minimaliste exploitant la puissance de [Kokkos](https://github.com/kokkos) pour la portabilité multi-backend (CPU/GPU). Son objectif est d'offrir une première prise en main de la bibliothèque Kokkos ainsi que des bases de l'IA.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         NEURAL K                                │
+├─────────────────────────────────────────────────────────────────┤
+│  InputLayer ──▶ HiddenLayer(s) ──▶ OutputLayer                  │
+│      │              │                   │                       │
+│   set_input()    forward()          forward()                   │
+│      │         z = W·a + b         z = W·a + b                  │
+│      ▼         a = σ(z)            a = σ(z)                     │
+│    [a]            [a]                [pred]                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Composants principaux
+
+| Fichier | Description |
+|---------|-------------|
+| `types.hpp` | Types Kokkos : `View1D`, `SparseMatrixType` (CSR) |
+| `layers.hpp/cpp` | Classes `InputLayer`, `Layer`, `OutputLayer` |
+| `activations.hpp/cpp` | ReLU, Sigmoid, Tanh, Linear |
+| `network.hpp/cpp` | Orchestration forward/backward pass |
+| `optimizers.hpp/cpp` | SGD et Adam |
+| `training.hpp/cpp` | Boucles d'entraînement génériques |
+| `sparsity_*.hpp/cpp` | Stratégies de pruning et sparsité |
+
+### Flux de données
+
+**Forward Pass** : Les données traversent le réseau couche par couche
+```
+Input ──▶ SpMV(W·a) + b ──▶ Activation(z) ──▶ Output
+```
+
+**Backward Pass** : Rétropropagation des gradients
+```
+δ_output = (pred - target) · σ'(z)
+δ_hidden = (W_next^T · δ_next) · σ'(z)
+∇W = δ · a_prev^T   (outer product sparse)
+```
+
+### Matrices creuses (CSR)
+
+Les poids sont stockés au format **Compressed Row Storage** via KokkosSparse :
+```
+row_map  : offsets des lignes
+entries  : indices colonnes
+values   : valeurs non-nulles
+```
+
+### Optimiseurs
+
+| Optimiseur | Formule |
+|------------|---------|
+| **SGD** | `w = w - lr · ∇w` |
+| **Adam** | `w = w - lr · m̂/(√v̂ + ε)` avec moments adaptatifs |
+
+### Sparsité et Pruning
+
+Plusieurs stratégies disponibles : threshold, L1 regularization, structural pruning, sensitivity-based, progressive, adaptive...
 
 ## Fonctionnalités clés
 
-- API C++ moderne et épurée reposant sur Kokkos.
-- Support initial des matrices creuses via KokkosSparse.
-- Optimiseurs intégrés : SGD et Adam.
-- Exemples complets d'entraînement dans `doc/examples.md`.
+- API C++ moderne et épurée reposant sur Kokkos
+- Support natif des matrices creuses via KokkosSparse (CSR)
+- Optimiseurs intégrés : SGD et Adam
+- Système de sparsité/pruning extensible
+- Portabilité CPU/GPU (OpenMP, CUDA, HIP)
+- Exemples complets d'entraînement dans `doc/examples.md`
 
  From the [Kokkos](https://github.com/kokkos) github repo : 
 > The Kokkos C++ Performance Portability Ecosystem is a production level solution for writing modern C++ applications in a hardware agnostic way.
