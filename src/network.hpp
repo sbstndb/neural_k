@@ -193,4 +193,19 @@ private:
             func(static_cast<Layer&>(output_layer), /*is_output=*/true, idx);
         }
     }
+
+    // Version const pour les méthodes const
+    template <typename Func>
+    void for_each_trainable_layer(Func&& func) const {
+        size_t idx = 0;
+        for (const Layer& layer : hidden_layers) {
+            if (layer.input_size > 0) {
+                func(layer, /*is_output=*/false, idx);
+                ++idx;
+            }
+        }
+        if (output_layer.input_size > 0) {
+            func(output_layer, /*is_output=*/true, idx);
+        }
+    }
 }; 
