@@ -1,33 +1,59 @@
-cmake_minimum_required(VERSION 3.20)
-project(neural_k)
+cmake_minimum_required(VERSION 3.23)
 
-set(Kokkos_COMMON_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../dep/Kokkos)
-find_package(Kokkos CONFIG)
+project(neural_k
+    VERSION 0.1.0
+    LANGUAGES CXX)
 
-find_package(KokkosKernels REQUIRED)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(HighFive)
+# Backend options
+option(NEURAL_K_OPENMP "Enable Kokkos OpenMP backend" OFF)
+option(NEURAL_K_CUDA "Enable Kokkos CUDA backend" OFF)
 
-if(Kokkos_FOUND)
-  message(STATUS "Found Kokkos: ${Kokkos_DIR} (version \"${Kokkos_VERSION}\")")
+include(FetchContent)
+
+# Kokkos configuration
+set(Kokkos_ENABLE_SERIAL ON CACHE BOOL "Enable Kokkos SERIAL backend" FORCE)
+
+if(NEURAL_K_OPENMP)
+    set(Kokkos_ENABLE_OPENMP ON CACHE BOOL "Enable Kokkos OPENMP backend" FORCE)
 else()
-  if(EXISTS ${Kokkos_COMMON_SOURCE_DIR})
-    add_subdirectory(${Kokkos_COMMON_SOURCE_DIR} Kokkos)
-  else()
-    include(FetchContent)
-    FetchContent_Declare(
-      Kokkos
-      GIT_REPOSITORY https://github.com/kokkos/kokkos.git
-      GIT_TAG        4.0.01
-      SOURCE_DIR ${Kokkos_COMMON_SOURCE_DIR}
-    )
-    FetchContent_MakeAvailable(Kokkos)
-  endif()
+    set(Kokkos_ENABLE_OPENMP OFF CACHE BOOL "Disable Kokkos OPENMP backend" FORCE)
 endif()
 
+if(NEURAL_K_CUDA)
+    set(Kokkos_ENABLE_CUDA ON CACHE BOOL "Enable Kokkos CUDA backend" FORCE)
+    set(Kokkos_ENABLE_CUDA_LAMBDA ON CACHE BOOL "Enable Kokkos CUDA lambdas" FORCE)
+else()
+    set(Kokkos_ENABLE_CUDA OFF CACHE BOOL "Disable Kokkos CUDA backend" FORCE)
+    set(Kokkos_ENABLE_CUDA_LAMBDA OFF CACHE BOOL "Disable Kokkos CUDA lambdas" FORCE)
+endif()
 
+# Fetch Kokkos
+FetchContent_Declare(
+    kokkos
+    GIT_REPOSITORY https://github.com/kokkos/kokkos.git
+    GIT_TAG 4.5.00
+)
+FetchContent_MakeAvailable(kokkos)
 
-add_executable(nk 
+# KokkosKernels configuration
+set(KokkosKernels_ENABLE_ALL_COMPONENTS OFF CACHE BOOL "" FORCE)
+set(KokkosKernels_ENABLE_COMPONENT_BLAS ON CACHE BOOL "" FORCE)
+set(KokkosKernels_ENABLE_COMPONENT_SPARSE ON CACHE BOOL "" FORCE)
+
+# Fetch KokkosKernels
+FetchContent_Declare(
+    kokkoskernels
+    GIT_REPOSITORY https://github.com/kokkos/kokkos-kernels.git
+    GIT_TAG 4.5.00
+)
+FetchContent_MakeAvailable(kokkoskernels)
+
+# Main executable
+add_executable(nk
     src/main.cpp
     src/activations.cpp
     src/optimizers.cpp
@@ -37,13 +63,16 @@ add_executable(nk
     src/sparsity_controller.cpp
     src/sparsity_strategies.cpp
 )
-target_link_libraries(nk Kokkos::kokkos Kokkos::kokkoskernels)
 
+target_link_libraries(nk
+    Kokkos::kokkos
+    Kokkos::kokkoskernels
+)
 
-
-
-
-
-
-
-
+# Print configuration summary
+message(STATUS "")
+message(STATUS "=== Neural K Configuration ===")
+message(STATUS "  OpenMP backend: ${NEURAL_K_OPENMP}")
+message(STATUS "  CUDA backend:   ${NEURAL_K_CUDA}")
+message(STATUS "==============================")
+message(STATUS "")

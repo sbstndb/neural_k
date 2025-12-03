@@ -1,5 +1,25 @@
 #include "layers.hpp"
 
+// Helper function to initialize sparse graph structure (extracted from constructor for CUDA compatibility)
+// CUDA does not allow extended lambdas in constructors
+namespace {
+    void init_sparse_graph(RowMapType& row_map, EntriesType& entries, int layer_size, int input_size, size_t nnz) {
+        Kokkos::parallel_for("create_dense_graph", layer_size, KOKKOS_LAMBDA(const int i) {
+            row_map(i) = static_cast<Offset>(i) * input_size;
+            for (int j = 0; j < input_size; ++j) {
+                Ordinal k = static_cast<Ordinal>(i) * input_size + j;
+                entries(k) = j;
+            }
+        });
+        // Set the last element of row_map separately
+        auto h_row_map = Kokkos::create_mirror_view(row_map);
+        Kokkos::deep_copy(h_row_map, row_map);
+        h_row_map(layer_size) = nnz;
+        Kokkos::deep_copy(row_map, h_row_map);
+        Kokkos::fence();
+    }
+}
+
 // --- Layer implementation ---
 Layer::Layer(int _input_size, int _layer_size, std::unique_ptr<Activation> act_func) :
     input_size(_input_size),
@@ -38,18 +58,8 @@ Layer::Layer(int _input_size, int _layer_size, std::unique_ptr<Activation> act_f
         ValuesType dw_values("dw_values", nnz);
         ValuesType dw_sum_values("dw_sum_values", nnz);
 
-        // Create graph structure
-        Kokkos::parallel_for("create_dense_graph", layer_size, KOKKOS_LAMBDA(const int i) {
-            row_map(i) = static_cast<Offset>(i) * input_size;
-            for (int j = 0; j < input_size; ++j) {
-                Ordinal k = static_cast<Ordinal>(i) * input_size + j;
-                entries(k) = j;
-            }
-            if (i == layer_size - 1) {
-                 row_map(layer_size) = nnz;
-            }
-        });
-        Kokkos::fence();
+        // Create graph structure using helper function (CUDA compatible)
+        init_sparse_graph(row_map, entries, layer_size, input_size, nnz);
 
         // Initialize weights with Xavier
         Kokkos::Random_XorShift64_Pool<> rand_pool(std::chrono::high_resolution_clock::now().time_since_epoch().count() + reinterpret_cast<uintptr_t>(this));

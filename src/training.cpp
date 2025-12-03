@@ -46,11 +46,32 @@ struct TrainingConfig {
 };
 
 struct TrainingData {
-    using HostView2D = Kokkos::View<real**, Kokkos::HostSpace>;
+    // Use LayoutLeft explicitly for CUDA compatibility (CUDA default is LayoutLeft, Host default is LayoutRight)
+    using HostView2D = Kokkos::View<real**, Kokkos::LayoutLeft, Kokkos::HostSpace>;
+    using DeviceView2D = Kokkos::View<real**, Kokkos::LayoutLeft, Kokkos::DefaultExecutionSpace>;
     HostView2D h_inputs, h_outputs;
-    Kokkos::View<real**, Kokkos::DefaultExecutionSpace> inputs, outputs;
+    DeviceView2D inputs, outputs;
     std::vector<int> train_indices, test_indices;
     int input_dim, output_dim;
+
+    // Copie les données host vers device et applique le split train/test
+    void finalize(int num_samples, real train_ratio, std::mt19937& gen) {
+        inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), h_inputs);
+        outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), h_outputs);
+        auto [train_idx, test_idx] = train_test_split(num_samples, train_ratio, gen);
+        train_indices = std::move(train_idx);
+        test_indices = std::move(test_idx);
+    }
+
+    // Variante sans split : tous les indices pour train et test (ex: XOR)
+    void finalize_no_split(int num_samples) {
+        inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), h_inputs);
+        outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), h_outputs);
+        train_indices.resize(num_samples);
+        test_indices.resize(num_samples);
+        std::iota(train_indices.begin(), train_indices.end(), 0);
+        std::iota(test_indices.begin(), test_indices.end(), 0);
+    }
 };
 
 std::unique_ptr<Optimizer> create_optimizer(const std::string& choice, const TrainingConfig& config) {
@@ -70,28 +91,36 @@ real get_learning_rate(const std::string& choice, const TrainingConfig& config) 
 }
 
 // Fonction générique d'entraînement minimaliste
-void generic_train_network(Network& network, TrainingData& data, const TrainingConfig& config, 
+void generic_train_network(Network& network, TrainingData& data, const TrainingConfig& config,
                           const std::string& optimizer_choice, std::mt19937& gen) {
     int epochs = get_epochs(optimizer_choice, config);
-    
+
     std::cout << "Training... ";
-    
+
+    // Pre-allocate temporary Views to avoid subview layout issues with CUDA
+    View1D input_sample("input_sample", data.input_dim);
+    View1D target_sample("target_sample", data.output_dim);
+
     for (int epoch = 0; epoch < epochs; ++epoch) {
         real total_epoch_cost = 0.0;
         std::shuffle(data.train_indices.begin(), data.train_indices.end(), gen);
-        
+
         for (int batch_start = 0; batch_start < static_cast<int>(data.train_indices.size()); batch_start += config.batch_size) {
             int current_batch_size = std::min(config.batch_size, static_cast<int>(data.train_indices.size()) - batch_start);
             if (current_batch_size <= 0) continue;
-            
+
             network.zero_accumulated_gradients();
             for (int j = 0; j < current_batch_size; ++j) {
                 int sample_index = data.train_indices[batch_start + j];
+                // Copy data to contiguous View1D (fixes CUDA layout compatibility)
                 auto input_subview = Kokkos::subview(data.inputs, sample_index, Kokkos::ALL());
                 auto target_subview = Kokkos::subview(data.outputs, sample_index, Kokkos::ALL());
-                View1D prediction = network.forward(input_subview);
-                total_epoch_cost += network.calculate_cost(prediction, target_subview);
-                network.backward(target_subview);
+                Kokkos::deep_copy(input_sample, input_subview);
+                Kokkos::deep_copy(target_sample, target_subview);
+
+                View1D prediction = network.forward(input_sample);
+                total_epoch_cost += network.calculate_cost(prediction, target_sample);
+                network.backward(target_sample);
             }
             network.update(current_batch_size);
         }
@@ -124,12 +153,20 @@ real generic_evaluate_network(Network& network, TrainingData& data) {
     auto h_prediction_result = Kokkos::create_mirror_view(prediction_result);
     real final_total_cost = 0.0;
     int correct_predictions = 0;
-    
+
+    // Pre-allocate temporary Views to avoid subview layout issues with CUDA
+    View1D input_sample("eval_input_sample", data.input_dim);
+    View1D target_sample("eval_target_sample", data.output_dim);
+
     for (int idx : data.test_indices) {
+        // Copy data to contiguous View1D (fixes CUDA layout compatibility)
         auto input_subview = Kokkos::subview(data.inputs, idx, Kokkos::ALL());
         auto target_subview = Kokkos::subview(data.outputs, idx, Kokkos::ALL());
-        View1D prediction = network.forward(input_subview);
-        final_total_cost += network.calculate_cost(prediction, target_subview);
+        Kokkos::deep_copy(input_sample, input_subview);
+        Kokkos::deep_copy(target_sample, target_subview);
+
+        View1D prediction = network.forward(input_sample);
+        final_total_cost += network.calculate_cost(prediction, target_sample);
         
         // Calcul de la précision pour classification
         if (data.output_dim == 1) {
@@ -248,12 +285,8 @@ TrainingData generate_xor_data(std::mt19937& gen) {
     data.h_inputs(1,0)=1; data.h_inputs(1,1)=0; data.h_outputs(1,0)=1;
     data.h_inputs(2,0)=0; data.h_inputs(2,1)=1; data.h_outputs(2,0)=1;
     data.h_inputs(3,0)=1; data.h_inputs(3,1)=1; data.h_outputs(3,0)=0;
-    
-    data.inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_inputs);
-    data.outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_outputs);
-    
-    data.train_indices = {0, 1, 2, 3};
-    data.test_indices = {0, 1, 2, 3};
+
+    data.finalize_no_split(4);
     return data;
 }
 
@@ -269,13 +302,8 @@ TrainingData generate_sine_data(int num_samples, std::mt19937& gen) {
         data.h_inputs(i, 0) = x;
         data.h_outputs(i, 0) = std::sin(x);
     }
-    
-    data.inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_inputs);
-    data.outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_outputs);
-    
-    auto [train_idx, test_idx] = train_test_split(num_samples, 0.8, gen);
-    data.train_indices = std::move(train_idx);
-    data.test_indices = std::move(test_idx);
+
+    data.finalize(num_samples, 0.8, gen);
     return data;
 }
 
@@ -292,17 +320,12 @@ TrainingData generate_linear_data(int num_samples, std::mt19937& gen) {
         do {
             x = distrib(gen); y = distrib(gen);
         } while (std::abs(y - x) < margin);
-        
+
         data.h_inputs(i, 0) = x; data.h_inputs(i, 1) = y;
         data.h_outputs(i, 0) = (y > x) ? 1.0 : 0.0;
     }
-    
-    data.inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_inputs);
-    data.outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_outputs);
-    
-    auto [train_idx, test_idx] = train_test_split(num_samples, 0.8, gen);
-    data.train_indices = std::move(train_idx);
-    data.test_indices = std::move(test_idx);
+
+    data.finalize(num_samples, 0.8, gen);
     return data;
 }
 
@@ -322,7 +345,7 @@ TrainingData generate_spiral_data(int num_samples, std::mt19937& gen) {
             real angle_offset = class_id * 2.0 * M_PI / 3.0;
             real x = radius * std::cos(t + angle_offset) + noise_distrib(gen);
             real y = radius * std::sin(t + angle_offset) + noise_distrib(gen);
-            
+
             data.h_inputs(sample_idx, 0) = x;
             data.h_inputs(sample_idx, 1) = y;
             for (int j = 0; j < 3; ++j) {
@@ -330,13 +353,8 @@ TrainingData generate_spiral_data(int num_samples, std::mt19937& gen) {
             }
         }
     }
-    
-    data.inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_inputs);
-    data.outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_outputs);
-    
-    auto [train_idx, test_idx] = train_test_split(num_samples, 0.8, gen);
-    data.train_indices = std::move(train_idx);
-    data.test_indices = std::move(test_idx);
+
+    data.finalize(num_samples, 0.8, gen);
     return data;
 }
 
@@ -353,7 +371,7 @@ TrainingData generate_gaussian_data(int num_samples, std::mt19937& gen) {
     for (int class_id = 0; class_id < 4; ++class_id) {
         std::normal_distribution<real> normal_x(centers[class_id][0], stds[class_id]);
         std::normal_distribution<real> normal_y(centers[class_id][1], stds[class_id]);
-        
+
         for (int i = 0; i < samples_per_class; ++i) {
             int sample_idx = class_id * samples_per_class + i;
             data.h_inputs(sample_idx, 0) = normal_x(gen);
@@ -363,13 +381,8 @@ TrainingData generate_gaussian_data(int num_samples, std::mt19937& gen) {
             }
         }
     }
-    
-    data.inputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_inputs);
-    data.outputs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace(), data.h_outputs);
-    
-    auto [train_idx, test_idx] = train_test_split(num_samples, 0.8, gen);
-    data.train_indices = std::move(train_idx);
-    data.test_indices = std::move(test_idx);
+
+    data.finalize(num_samples, 0.8, gen);
     return data;
 }
 

@@ -1,0 +1,67 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 23,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "serial",
+      "displayName": "Kokkos SERIAL backend",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-serial",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "openmp",
+      "displayName": "Kokkos OPENMP + SERIAL backends",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-openmp",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "NEURAL_K_OPENMP": "ON"
+      }
+    },
+    {
+      "name": "cuda",
+      "displayName": "Kokkos CUDA + SERIAL backends",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-cuda",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "NEURAL_K_CUDA": "ON",
+        "CMAKE_CXX_COMPILER": "g++-12"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug build (SERIAL)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "serial",
+      "configurePreset": "serial"
+    },
+    {
+      "name": "openmp",
+      "configurePreset": "openmp"
+    },
+    {
+      "name": "cuda",
+      "configurePreset": "cuda"
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    }
+  ]
+}
