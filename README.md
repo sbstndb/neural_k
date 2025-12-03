@@ -1,6 +1,6 @@
-# Neural K - Réseau de Neurones avec Kokkos
+# Neural K - Neural Network with Kokkos
 
-Neural K est un projet de réseau de neurones minimaliste exploitant la puissance de [Kokkos](https://github.com/kokkos) pour la portabilité multi-backend (CPU/GPU). Son objectif est d'offrir une première prise en main de la bibliothèque Kokkos ainsi que des bases de l'IA.
+Neural K is a minimalist neural network project leveraging the power of [Kokkos](https://github.com/kokkos) for multi-backend portability (CPU/GPU). Its goal is to provide a first hands-on experience with the Kokkos library and AI fundamentals.
 
 ## Architecture
 
@@ -17,60 +17,60 @@ Neural K est un projet de réseau de neurones minimaliste exploitant la puissanc
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Composants principaux
+### Main Components
 
-| Fichier | Description |
-|---------|-------------|
-| `types.hpp` | Types Kokkos : `View1D`, `SparseMatrixType` (CSR) |
-| `layers.hpp/cpp` | Classes `InputLayer`, `Layer`, `OutputLayer` |
+| File | Description |
+|------|-------------|
+| `types.hpp` | Kokkos types: `View1D`, `SparseMatrixType` (CSR) |
+| `layers.hpp/cpp` | `InputLayer`, `Layer`, `OutputLayer` classes |
 | `activations.hpp/cpp` | ReLU, Sigmoid, Tanh, Linear |
-| `network.hpp/cpp` | Orchestration forward/backward pass |
-| `optimizers.hpp/cpp` | SGD et Adam |
-| `training.hpp/cpp` | Boucles d'entraînement génériques |
-| `sparsity_*.hpp/cpp` | Stratégies de pruning et sparsité |
+| `network.hpp/cpp` | Forward/backward pass orchestration |
+| `optimizers.hpp/cpp` | SGD and Adam |
+| `training.hpp/cpp` | Generic training loops |
+| `sparsity_*.hpp/cpp` | Pruning and sparsity strategies |
 
-### Flux de données
+### Data Flow
 
-**Forward Pass** : Les données traversent le réseau couche par couche
+**Forward Pass**: Data flows through the network layer by layer
 ```
 Input ──▶ SpMV(W·a) + b ──▶ Activation(z) ──▶ Output
 ```
 
-**Backward Pass** : Rétropropagation des gradients
+**Backward Pass**: Gradient backpropagation
 ```
 δ_output = (pred - target) · σ'(z)
 δ_hidden = (W_next^T · δ_next) · σ'(z)
 ∇W = δ · a_prev^T   (outer product sparse)
 ```
 
-### Matrices creuses (CSR)
+### Sparse Matrices (CSR)
 
-Les poids sont stockés au format **Compressed Row Storage** via KokkosSparse :
+Weights are stored in **Compressed Row Storage** format via KokkosSparse:
 ```
-row_map  : offsets des lignes
-entries  : indices colonnes
-values   : valeurs non-nulles
+row_map  : row offsets
+entries  : column indices
+values   : non-zero values
 ```
 
-### Optimiseurs
+### Optimizers
 
-| Optimiseur | Formule |
-|------------|---------|
+| Optimizer | Formula |
+|-----------|---------|
 | **SGD** | `w = w - lr · ∇w` |
-| **Adam** | `w = w - lr · m̂/(√v̂ + ε)` avec moments adaptatifs |
+| **Adam** | `w = w - lr · m̂/(√v̂ + ε)` with adaptive moments |
 
-### Sparsité et Pruning
+### Sparsity and Pruning
 
-Plusieurs stratégies disponibles : threshold, L1 regularization, structural pruning, sensitivity-based, progressive, adaptive...
+Several strategies available: threshold, L1 regularization, structural pruning, sensitivity-based, progressive, adaptive...
 
-## Fonctionnalités clés
+## Key Features
 
-- API C++ moderne et épurée reposant sur Kokkos
-- Support natif des matrices creuses via KokkosSparse (CSR)
-- Optimiseurs intégrés : SGD et Adam
-- Système de sparsité/pruning extensible
-- Portabilité CPU/GPU (OpenMP, CUDA, HIP)
-- Exemples complets d'entraînement dans `doc/examples.md`
+- Modern and clean C++ API built on Kokkos
+- Native sparse matrix support via KokkosSparse (CSR)
+- Built-in optimizers: SGD and Adam
+- Extensible sparsity/pruning system
+- CPU/GPU portability (OpenMP, CUDA, HIP)
+- Complete training examples in `doc/examples.md`
 
  From the [Kokkos](https://github.com/kokkos) github repo : 
 > The Kokkos C++ Performance Portability Ecosystem is a production level solution for writing modern C++ applications in a hardware agnostic way.
